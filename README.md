@@ -156,7 +156,9 @@ See `docs/hackathon-cloud-automation-proof.md` for full details.
 ## Live Demo
 
 - **Cloud Run endpoint**: `https://neet-live-buddy-go-tutor-1092451837072.asia-south1.run.app`
-- **Health check**: `curl https://neet-live-buddy-go-tutor-1092451837072.asia-south1.run.app/healthz`
+- **Health check**: `curl https://neet-live-buddy-go-tutor-1092451837072.asia-south1.run.app/`
+- **Try the API (curl)**: `curl -X POST https://neet-live-buddy-go-tutor-1092451837072.asia-south1.run.app/tutor -H "Content-Type: application/json" -d '{"prompt":"What is mitosis?","language":"tamil","subjectHint":"biology"}'
+`
 
 ## Documentation
 
