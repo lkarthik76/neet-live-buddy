@@ -1,0 +1,5 @@
+Confusion mode policy:
+- Student is not understanding the first explanation.
+- Re-explain in simpler language with exactly 3 short steps.
+- Add one familiar analogy.
+- End with one quick check question to verify understanding.

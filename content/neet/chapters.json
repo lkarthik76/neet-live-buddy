@@ -1,0 +1,55 @@
+{
+  "subjects": {
+    "physics": [
+      {
+        "chapter": "Current Electricity",
+        "neetWeight": "high",
+        "topics": ["Ohm's law", "Kirchhoff rules", "Series/parallel circuits", "Drift velocity"]
+      },
+      {
+        "chapter": "Electrostatics",
+        "neetWeight": "high",
+        "topics": ["Coulomb's law", "Electric field", "Potential", "Capacitance"]
+      },
+      {
+        "chapter": "Ray Optics",
+        "neetWeight": "medium",
+        "topics": ["Mirror formula", "Lens formula", "Refraction", "Total internal reflection"]
+      }
+    ],
+    "chemistry": [
+      {
+        "chapter": "Chemical Bonding",
+        "neetWeight": "high",
+        "topics": ["VSEPR", "Hybridization", "Molecular orbital theory", "Polarity"]
+      },
+      {
+        "chapter": "Thermodynamics",
+        "neetWeight": "medium",
+        "topics": ["First law", "Enthalpy", "Entropy", "Gibbs free energy"]
+      },
+      {
+        "chapter": "Coordination Compounds",
+        "neetWeight": "medium",
+        "topics": ["IUPAC naming", "Isomerism", "Crystal field theory", "Werner theory"]
+      }
+    ],
+    "biology": [
+      {
+        "chapter": "Cell: The Unit of Life",
+        "neetWeight": "high",
+        "topics": ["Cell organelles", "Prokaryotic vs eukaryotic", "Membrane transport", "Cell cycle"]
+      },
+      {
+        "chapter": "Human Physiology",
+        "neetWeight": "high",
+        "topics": ["Digestion", "Respiration", "Circulation", "Neural control"]
+      },
+      {
+        "chapter": "Genetics and Evolution",
+        "neetWeight": "high",
+        "topics": ["Mendelian genetics", "Linkage", "Molecular basis of inheritance", "Hardy-Weinberg"]
+      }
+    ]
+  }
+}

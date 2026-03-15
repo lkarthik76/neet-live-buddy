@@ -1,0 +1,14 @@
+.env.local
+.env
+.DS_Store
+.venv
+
+# KMP / Android Studio
+kmp-app/.gradle
+kmp-app/.idea
+kmp-app/local.properties
+kmp-app/**/build
+
+# Python
+__pycache__
+*.pyc

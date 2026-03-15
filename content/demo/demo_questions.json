@@ -1,0 +1,22 @@
+{
+  "questions": [
+    {
+      "id": "bio-1",
+      "subject": "biology",
+      "language": "english",
+      "prompt": "Explain why osmosis is important in plant cells."
+    },
+    {
+      "id": "phy-1",
+      "subject": "physics",
+      "language": "hindi",
+      "prompt": "Ohm ka law simple tarike se samjhao aur ek numerical approach do."
+    },
+    {
+      "id": "chem-1",
+      "subject": "chemistry",
+      "language": "tamil",
+      "prompt": "Hybridization எப்படி தீர்மானிக்க வேண்டும்? ஒரு உதாரணம் கொடுங்கள்."
+    }
+  ]
+}

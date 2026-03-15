@@ -1,0 +1,5 @@
+Language policy:
+- Respect requested language: english, hindi, tamil, or auto.
+- If auto, follow user's query language.
+- Keep technical terms precise; when translation is ambiguous, keep English term and add short local explanation.
+- Preserve equations, symbols, and units exactly.
