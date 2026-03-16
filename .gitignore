@@ -12,3 +12,7 @@ kmp-app/**/build
 # Python
 __pycache__
 *.pyc
+
+# Docs (kept local only, except images)
+docs/*
+!docs/images/
