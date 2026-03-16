@@ -151,22 +151,12 @@ All infrastructure is automated via scripts in `infra/`:
 - **`deploy-go-tutor.sh`** — builds Docker image with Cloud Build, deploys to Cloud Run with all env vars
 - **`cloudbuild-go-tutor.yaml`** — Cloud Build configuration for multi-stage Docker build
 
-See `docs/hackathon-cloud-automation-proof.md` for full details.
-
 ## Live Demo
 
+- **Demo Video**: https://youtu.be/RiP6Jx9Bi2g
+- **GCP Deployment Proof**: https://youtu.be/ZLQunCL7II0
 - **Cloud Run endpoint**: `https://neet-live-buddy-go-tutor-1092451837072.asia-south1.run.app`
 - **Health check**: `curl https://neet-live-buddy-go-tutor-1092451837072.asia-south1.run.app/`
-- **Try the API (curl)**: `curl -X POST https://neet-live-buddy-go-tutor-1092451837072.asia-south1.run.app/tutor -H "Content-Type: application/json" -d '{"prompt":"What is mitosis?","language":"tamil","subjectHint":"biology"}'
-`
-
-## Documentation
-
-- [Setup & Run Guide](docs/setup-and-run.md)
-- [GCP Deployment Guide](docs/deploy-gcp-end-to-end.md)
-- [NCERT RAG Setup](docs/ncert-rag-setup.md)
-- [Content & Gemini Usage](docs/content-and-gemini-usage.md)
-- [Cloud Automation Proof](docs/hackathon-cloud-automation-proof.md)
 
 ## License
 

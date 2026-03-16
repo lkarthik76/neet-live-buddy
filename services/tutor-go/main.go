@@ -629,7 +629,7 @@ func downloadIndexFromGCSIfConfigured(localPath string) string {
 		log.Printf("invalid NCERT_VECTOR_INDEX_GCS_URI: %v", err)
 		return localPath
 	}
-	client := &http.Client{Timeout: 30 * time.Second}
+	client := &http.Client{Timeout: 90 * time.Second}
 	token, err := getMetadataAccessToken(client)
 	if err != nil {
 		log.Printf("metadata token unavailable; cannot pull private GCS index: %v", err)
@@ -674,7 +674,7 @@ func tutorHandler(gemini *GeminiClient) http.HandlerFunc {
 
 		var res TutorResponse
 		if gemini.IsConfigured() {
-			ctx, cancel := context.WithTimeout(r.Context(), 25*time.Second)
+			ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
 			defer cancel()
 			modelRes, err := gemini.GenerateTutorResponse(ctx, req)
 			if err != nil {
@@ -701,8 +701,9 @@ func main() {
 	retriever := LoadRetriever(indexPath)
 	gemini := NewGeminiClientFromEnv(content, retriever)
 	mux := http.NewServeMux()
-	mux.HandleFunc("/healthz", healthHandler)
-	mux.HandleFunc("/tutor", tutorHandler(gemini))
+	mux.HandleFunc("GET /health", healthHandler)
+	mux.HandleFunc("GET /", healthHandler)
+	mux.HandleFunc("POST /tutor", tutorHandler(gemini))
 
 	port := os.Getenv("PORT")
 	if port == "" {
