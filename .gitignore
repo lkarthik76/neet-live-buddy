@@ -16,6 +16,5 @@ kmp-app/keystore.properties
 __pycache__
 *.pyc
 
-# Docs (kept local only, except images)
-docs/*
-!docs/images/
+# Docs
+# (all docs tracked in private repo)
