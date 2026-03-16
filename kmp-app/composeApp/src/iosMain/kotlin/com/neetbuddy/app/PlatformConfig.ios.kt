@@ -1,4 +1,4 @@
 package com.neetbuddy.app
 
 actual fun getBackendUrl(): String =
-    "https://neet-live-buddy-go-tutor-1092451837072.asia-south1.run.app"
+    "https://smart-study-buddy-go-tutor-567474220033.asia-south1.run.app"

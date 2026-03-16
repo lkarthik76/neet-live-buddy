@@ -730,6 +730,102 @@ func usageHandler(tracker *UsageTracker) http.HandlerFunc {
 	}
 }
 
+type linkRequest struct {
+	DeviceId string `json:"deviceId"`
+	Email    string `json:"email"`
+}
+
+type tierRequest struct {
+	DeviceId string `json:"deviceId"`
+	Email    string `json:"email"`
+	Tier     string `json:"tier"`
+}
+
+func linkEmailHandler(tracker *UsageTracker) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var req linkRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid request body", http.StatusBadRequest)
+			return
+		}
+		if strings.TrimSpace(req.DeviceId) == "" || strings.TrimSpace(req.Email) == "" {
+			http.Error(w, "deviceId and email are required", http.StatusBadRequest)
+			return
+		}
+		usage := tracker.LinkEmail(req.DeviceId, req.Email)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(usage)
+	}
+}
+
+func restoreHandler(tracker *UsageTracker) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var req linkRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid request body", http.StatusBadRequest)
+			return
+		}
+		if strings.TrimSpace(req.DeviceId) == "" || strings.TrimSpace(req.Email) == "" {
+			http.Error(w, "deviceId and email are required", http.StatusBadRequest)
+			return
+		}
+		usage, found := tracker.RestoreByEmail(req.DeviceId, req.Email)
+		if !found {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusNotFound)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"error":   "account_not_found",
+				"message": "No account found with this email. Sign in on your original device first.",
+			})
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(usage)
+	}
+}
+
+func tierHandler(tracker *UsageTracker) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var req tierRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid request body", http.StatusBadRequest)
+			return
+		}
+
+		deviceId := strings.TrimSpace(req.DeviceId)
+		email := strings.TrimSpace(req.Email)
+		tierStr := strings.ToLower(strings.TrimSpace(req.Tier))
+		if deviceId == "" {
+			http.Error(w, "deviceId is required", http.StatusBadRequest)
+			return
+		}
+
+		var tier Tier
+		switch tierStr {
+		case string(TierFree):
+			tier = TierFree
+		case string(TierPro):
+			tier = TierPro
+		case string(TierUltimate):
+			tier = TierUltimate
+		default:
+			http.Error(w, "tier must be one of: free, pro, ultimate", http.StatusBadRequest)
+			return
+		}
+
+		if email != "" {
+			tracker.LinkEmail(deviceId, email)
+			tracker.SetTierByEmail(email, tier)
+		} else {
+			tracker.SetTier(deviceId, tier)
+		}
+
+		usage := tracker.GetUsage(deviceId)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(usage)
+	}
+}
+
 func main() {
 	content := loadContentStore()
 	contentDir := resolveContentDir()
@@ -743,6 +839,9 @@ func main() {
 	mux.HandleFunc("GET /", healthHandler)
 	mux.HandleFunc("GET /usage", usageHandler(tracker))
 	mux.HandleFunc("POST /tutor", tutorHandler(gemini, tracker))
+	mux.HandleFunc("POST /auth/link", linkEmailHandler(tracker))
+	mux.HandleFunc("POST /auth/restore", restoreHandler(tracker))
+	mux.HandleFunc("POST /tier", tierHandler(tracker))
 
 	port := os.Getenv("PORT")
 	if port == "" {

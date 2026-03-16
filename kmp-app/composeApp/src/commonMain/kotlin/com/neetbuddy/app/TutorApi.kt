@@ -57,4 +57,35 @@ class TutorApi {
     suspend fun getUsage(baseUrl: String, deviceId: String): UsageInfo {
         return client.get("${baseUrl.trimEnd('/')}/usage?deviceId=$deviceId").body()
     }
+
+    suspend fun linkEmail(baseUrl: String, deviceId: String, email: String): UsageInfo {
+        return client.post("${baseUrl.trimEnd('/')}/auth/link") {
+            contentType(ContentType.Application.Json)
+            setBody(mapOf("deviceId" to deviceId, "email" to email))
+        }.body()
+    }
+
+    suspend fun restorePurchase(baseUrl: String, deviceId: String, email: String): UsageInfo {
+        val response = client.post("${baseUrl.trimEnd('/')}/auth/restore") {
+            contentType(ContentType.Application.Json)
+            setBody(mapOf("deviceId" to deviceId, "email" to email))
+        }
+        if (response.status.value == 404) {
+            throw Exception("No account found with this email.")
+        }
+        return response.body()
+    }
+
+    suspend fun setTier(baseUrl: String, deviceId: String, email: String, tier: String): UsageInfo {
+        return client.post("${baseUrl.trimEnd('/')}/tier") {
+            contentType(ContentType.Application.Json)
+            setBody(
+                mapOf(
+                    "deviceId" to deviceId,
+                    "email" to email,
+                    "tier" to tier,
+                ),
+            )
+        }.body()
+    }
 }

@@ -7,7 +7,7 @@ if [[ -z "${GOOGLE_CLOUD_PROJECT:-}" ]]; then
 fi
 
 REGION="${GOOGLE_CLOUD_REGION:-asia-south1}"
-SERVICE_NAME="${SERVICE_NAME:-neet-live-buddy}"
+SERVICE_NAME="${SERVICE_NAME:-smart-study-buddy}"
 IMAGE="gcr.io/${GOOGLE_CLOUD_PROJECT}/${SERVICE_NAME}:latest"
 
 echo "Building image ${IMAGE}"

@@ -76,14 +76,14 @@ Keep:
 Upload index:
 
 ```bash
-gsutil mb -l asia-south1 gs://neet-live-buddy-content
-gsutil cp content/index/ncert_embeddings.jsonl gs://neet-live-buddy-content/index/ncert_embeddings.jsonl
+gsutil mb -l asia-south1 gs://smart-study-buddy-content
+gsutil cp content/index/ncert_embeddings.jsonl gs://smart-study-buddy-content/index/ncert_embeddings.jsonl
 ```
 
 Set service env:
 
 ```bash
-export NCERT_VECTOR_INDEX_GCS_URI="gs://neet-live-buddy-content/index/ncert_embeddings.jsonl"
+export NCERT_VECTOR_INDEX_GCS_URI="gs://smart-study-buddy-content/index/ncert_embeddings.jsonl"
 export NCERT_VECTOR_INDEX_PATH="/tmp/ncert_embeddings.jsonl"
 ```
 
@@ -96,7 +96,7 @@ Grant permission:
 ```bash
 PROJECT_NUMBER=$(gcloud projects describe "$GOOGLE_CLOUD_PROJECT" --format='value(projectNumber)')
 SA="${PROJECT_NUMBER}-compute@developer.gserviceaccount.com"
-gcloud storage buckets add-iam-policy-binding gs://neet-live-buddy-content \
+gcloud storage buckets add-iam-policy-binding gs://smart-study-buddy-content \
   --member="serviceAccount:${SA}" \
   --role="roles/storage.objectViewer"
 ```

@@ -23,17 +23,56 @@
 
 ## Technical Implementation
 
-### Device Identity (No Login Required)
-- Generate UUID on first app launch
+### Identity & Account Recovery
+- Generate UUID on first app launch (device identity)
 - Store in Android SharedPreferences / iOS UserDefaults
 - Send as `deviceId` in every API request
-- Future: Firebase Auth for cross-device sync
+- **Email Linking**: Users can link an email to their device account
+  - Protects paid subscriptions if device is lost/replaced
+  - `POST /auth/link` — links email to current device + tier
+  - `POST /auth/restore` — on a new device, enter email to restore tier
+- Account record stores: `email -> {tier, deviceIds[]}`
+- Multiple devices can share one account (e.g. phone + tablet)
+- Future: Firebase Auth / Google Sign-In for seamless login
+
+### Data Storage
+
+| Data | Where | Details |
+|---|---|---|
+| Device UUID | Client (SharedPreferences / UserDefaults) | Generated once on first launch, persists locally |
+| Email address | Firestore `accounts/{email}` | Linked by user, persists permanently |
+| Tier (free/pro/ultimate) | Firestore `accounts/{email}` | Account-level, survives device loss |
+| Daily usage count | Firestore `devices/{deviceId}` | Resets at midnight UTC |
+| Device → Email mapping | Firestore `devices/{deviceId}` | Links device to its account |
+| Account → Devices list | Firestore `accounts/{email}` | One email can have multiple devices |
+| Payment receipts | Google Play + Backend | Verified via Google Play Developer API |
+| Question/answer history | Not stored (Phase 2: Firestore) | Future: per-account doubt history |
+
+**Storage:** All server-side data is persisted in **Firestore** (GCP free tier: 1 GiB, 50K reads/day, 20K writes/day — zero cost at our scale).
+
+```
+Firestore collections:
+├── accounts/{email}
+│   ├── tier: "pro"
+│   ├── linkedDevices: ["uuid-1", "uuid-2"]
+│   ├── linkedAt: timestamp
+│   └── paymentHistory: [...]
+├── devices/{deviceId}
+│   ├── email: "user@example.com"  (or empty for anonymous)
+│   ├── tier: "free"
+│   ├── dailyUsage: { count: 7, date: "2026-03-16" }
+│   └── createdAt: timestamp
+└── history/{email}/doubts/{autoId}     ← Phase 2
+    ├── prompt, answer, subject, timestamp
+    └── imageUsed: true/false
+```
 
 ### Usage Tracking (Server-side)
-- Backend maintains in-memory map: `deviceId -> {count, date, tier}`
-- Resets daily at midnight UTC
-- Returns usage info in every response
-- Future: Firestore for persistence across cold starts
+- Firestore `devices/{deviceId}` stores: `{dailyCount, countDate, tier, email, createdAt}`
+- Firestore `accounts/{email}` stores: `{tier, deviceIds[], linkedAt}`
+- Daily count resets at midnight UTC (checked on read)
+- Returns usage info (including linked email) in every `/tutor` response
+- Data persists across Cloud Run cold starts, redeployments, and scaling
 
 ### Tier Enforcement Flow
 ```
@@ -97,10 +136,25 @@ POST /tutor
 }
 ```
 
-**New endpoint** — check usage:
+**Check usage:**
 ```json
 GET /usage?deviceId=uuid-...
-Response: { "used": 7, "limit": 10, "tier": "free", "resetsAt": "2026-03-17T00:00:00Z" }
+→ { "used": 7, "limit": 10, "tier": "free", "email": "", "resetsAt": "2026-03-17T00:00:00Z" }
+```
+
+**Link email to device** (protects paid subscription):
+```json
+POST /auth/link
+{ "deviceId": "uuid-...", "email": "user@example.com" }
+→ { "used": 7, "limit": 10, "tier": "pro", "email": "user@example.com", "resetsAt": "..." }
+```
+
+**Restore purchase on new device:**
+```json
+POST /auth/restore
+{ "deviceId": "new-uuid-...", "email": "user@example.com" }
+→ { "used": 0, "limit": -1, "tier": "pro", "email": "user@example.com", "resetsAt": "..." }
+// Returns 404 if email not found
 ```
 
 ### Payment Integration (Phase 2)

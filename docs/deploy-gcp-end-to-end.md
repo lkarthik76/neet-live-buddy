@@ -39,8 +39,8 @@ gcloud firestore databases create --location="${GOOGLE_CLOUD_REGION}" --type=fir
 
 ```bash
 export GOOGLE_GENAI_API_KEY="your-genai-api-key"
-export GO_TUTOR_SERVICE_NAME="neet-live-buddy-go-tutor"
-export SERVICE_NAME="neet-live-buddy-web"
+export GO_TUTOR_SERVICE_NAME="smart-study-buddy-go-tutor"
+export SERVICE_NAME="smart-study-buddy-web"
 export ENABLE_NCERT_RAG=true
 export NCERT_TOP_K=4
 ```
@@ -48,9 +48,9 @@ export NCERT_TOP_K=4
 If using GCS-hosted vector index (recommended), upload once:
 
 ```bash
-gsutil mb -l "${GOOGLE_CLOUD_REGION}" gs://neet-live-buddy-content
-gsutil cp content/index/ncert_embeddings.jsonl gs://neet-live-buddy-content/index/ncert_embeddings.jsonl
-export NCERT_VECTOR_INDEX_GCS_URI="gs://neet-live-buddy-content/index/ncert_embeddings.jsonl"
+gsutil mb -l "${GOOGLE_CLOUD_REGION}" gs://smart-study-buddy-content
+gsutil cp content/index/ncert_embeddings.jsonl gs://smart-study-buddy-content/index/ncert_embeddings.jsonl
+export NCERT_VECTOR_INDEX_GCS_URI="gs://smart-study-buddy-content/index/ncert_embeddings.jsonl"
 export NCERT_VECTOR_INDEX_PATH="/tmp/ncert_embeddings.jsonl"
 ```
 
@@ -59,7 +59,7 @@ Grant Cloud Run service account read access:
 ```bash
 PROJECT_NUMBER=$(gcloud projects describe "$GOOGLE_CLOUD_PROJECT" --format='value(projectNumber)')
 SA="${PROJECT_NUMBER}-compute@developer.gserviceaccount.com"
-gcloud storage buckets add-iam-policy-binding gs://neet-live-buddy-content \
+gcloud storage buckets add-iam-policy-binding gs://smart-study-buddy-content \
   --member="serviceAccount:${SA}" \
   --role="roles/storage.objectViewer"
 ```

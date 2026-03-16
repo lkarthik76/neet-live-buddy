@@ -31,6 +31,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.Button
@@ -108,16 +109,25 @@ fun NeetLiveBuddyApp() {
                             )
                             Text(
                                 "AI-Powered NEET Exam Tutor",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = Color.White.copy(alpha = 0.7f),
+                                style = MaterialTheme.typography.labelMedium,
+                                color = Color.White.copy(alpha = 0.92f),
                             )
                         }
                     },
                     actions = {
                         if (state.isFreeTier && state.dailyLimit > 0) {
                             UsageBadge(used = state.dailyUsed, limit = state.dailyLimit)
-                            Spacer(Modifier.width(8.dp))
+                            Spacer(Modifier.width(4.dp))
                         }
+                        Icon(
+                            imageVector = Icons.Default.AccountCircle,
+                            contentDescription = "Account",
+                            tint = if (state.isSignedIn) Gold else Color.White.copy(alpha = 0.9f),
+                            modifier = Modifier
+                                .size(28.dp)
+                                .clickable { state.showSignIn = !state.showSignIn },
+                        )
+                        Spacer(Modifier.width(4.dp))
                         LanguagePill(
                             selected = state.language,
                             onSelect = { state.language = it },
@@ -142,6 +152,41 @@ fun NeetLiveBuddyApp() {
                     FreeTierBanner(
                         questionsLeft = state.questionsRemaining,
                         onUpgradeClick = { state.showUpgradePrompt = true },
+                    )
+                }
+
+                AnimatedVisibility(
+                    visible = state.showSignIn,
+                    enter = fadeIn() + expandVertically(),
+                    exit = fadeOut() + shrinkVertically(),
+                ) {
+                    AccountCard(
+                        state = state,
+                        onLink = { email ->
+                            scope.launch {
+                                try {
+                                    val usage = api.linkEmail(baseUrl, deviceId, email)
+                                    state.updateUsage(usage)
+                                    state.showSignIn = false
+                                    snackbarHostState.showSnackbar("Account linked: $email")
+                                } catch (e: Exception) {
+                                    snackbarHostState.showSnackbar(e.message ?: "Failed to link email")
+                                }
+                            }
+                        },
+                        onRestore = { email ->
+                            scope.launch {
+                                try {
+                                    val usage = api.restorePurchase(baseUrl, deviceId, email)
+                                    state.updateUsage(usage)
+                                    state.showSignIn = false
+                                    snackbarHostState.showSnackbar("Account restored! Tier: ${usage.tier}")
+                                } catch (e: Exception) {
+                                    snackbarHostState.showSnackbar(e.message ?: "Restore failed")
+                                }
+                            }
+                        },
+                        onDismiss = { state.showSignIn = false },
                     )
                 }
 
@@ -200,6 +245,26 @@ fun NeetLiveBuddyApp() {
 
                 AnimatedVisibility(visible = state.showUpgradePrompt) {
                     UpgradePromptCard(
+                        currentTier = state.tier,
+                        onSelectPlan = { tier ->
+                            scope.launch {
+                                try {
+                                    val usage = api.setTier(
+                                        baseUrl = baseUrl,
+                                        deviceId = deviceId,
+                                        email = state.email,
+                                        tier = tier,
+                                    )
+                                    state.updateUsage(usage)
+                                    state.showUpgradePrompt = false
+                                    snackbarHostState.showSnackbar(
+                                        "${tier.replaceFirstChar { it.uppercase() }} plan selected",
+                                    )
+                                } catch (e: Exception) {
+                                    snackbarHostState.showSnackbar(e.message ?: "Failed to select plan")
+                                }
+                            }
+                        },
                         onDismiss = { state.showUpgradePrompt = false },
                     )
                 }
@@ -672,7 +737,7 @@ private fun FreeTierBanner(questionsLeft: Int, onUpgradeClick: () -> Unit) {
                 Text(
                     "Upgrade to Pro for unlimited questions + detailed analysis",
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.9f),
                 )
             }
             Button(
@@ -687,7 +752,11 @@ private fun FreeTierBanner(questionsLeft: Int, onUpgradeClick: () -> Unit) {
 }
 
 @Composable
-private fun UpgradePromptCard(onDismiss: () -> Unit) {
+private fun UpgradePromptCard(
+    currentTier: String,
+    onSelectPlan: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
     Card(
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.secondaryContainer,
@@ -720,20 +789,22 @@ private fun UpgradePromptCard(onDismiss: () -> Unit) {
                     name = "Pro",
                     price = "Rs 99/month",
                     features = "Unlimited questions, full analysis, revision cards",
-                    highlighted = true,
+                    highlighted = currentTier == "pro",
+                    onClick = { onSelectPlan("pro") },
                 )
                 PricingOption(
                     name = "Ultimate",
                     price = "Rs 299/month",
                     features = "Everything in Pro + practice tests, analytics, offline",
-                    highlighted = false,
+                    highlighted = currentTier == "ultimate",
+                    onClick = { onSelectPlan("ultimate") },
                 )
             }
 
             Text(
                 "Coming soon to Google Play Store",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.5f),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.75f),
             )
 
             OutlinedButton(
@@ -752,13 +823,16 @@ private fun PricingOption(
     price: String,
     features: String,
     highlighted: Boolean,
+    onClick: () -> Unit,
 ) {
     val containerColor = if (highlighted) Orange else MaterialTheme.colorScheme.surface
     val contentColor = if (highlighted) Color.White else MaterialTheme.colorScheme.onSurface
     Card(
         colors = CardDefaults.cardColors(containerColor = containerColor),
         shape = RoundedCornerShape(12.dp),
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClick() },
     ) {
         Row(
             modifier = Modifier.padding(14.dp).fillMaxWidth(),
@@ -784,6 +858,115 @@ private fun PricingOption(
                 fontWeight = FontWeight.Bold,
                 color = contentColor,
             )
+        }
+    }
+}
+
+@Composable
+private fun AccountCard(
+    state: AppState,
+    onLink: (String) -> Unit,
+    onRestore: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var emailInput by remember { mutableStateOf(state.email) }
+    val isAlreadyLinked = state.isSignedIn
+
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface,
+        ),
+        shape = RoundedCornerShape(16.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(
+                if (isAlreadyLinked) "Account" else "Sign In",
+                style = MaterialTheme.typography.titleLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+
+            if (isAlreadyLinked) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        Icons.Default.AccountCircle,
+                        contentDescription = null,
+                        tint = SuccessGreen,
+                        modifier = Modifier.size(24.dp),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Column {
+                        Text(
+                            state.email,
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Text(
+                            "Tier: ${state.tier.replaceFirstChar { it.uppercase() }}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+                Text(
+                    "Your subscription is linked to this email. " +
+                        "If you switch devices, sign in with the same email to restore your plan.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else {
+                Text(
+                    "Link your email to protect your subscription. " +
+                        "If you lose your device, sign in on a new one to restore your plan.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+
+                OutlinedTextField(
+                    value = emailInput,
+                    onValueChange = { emailInput = it },
+                    label = { Text("Email address") },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    singleLine = true,
+                )
+
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Button(
+                        onClick = { onLink(emailInput.trim()) },
+                        enabled = emailInput.trim().contains("@"),
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Text("Link Account", style = MaterialTheme.typography.labelMedium)
+                    }
+
+                    OutlinedButton(
+                        onClick = { onRestore(emailInput.trim()) },
+                        enabled = emailInput.trim().contains("@"),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Text("Restore Purchase", style = MaterialTheme.typography.labelMedium, fontSize = 12.sp)
+                    }
+                }
+            }
+
+            OutlinedButton(
+                onClick = onDismiss,
+                shape = RoundedCornerShape(10.dp),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("Close", style = MaterialTheme.typography.labelMedium)
+            }
         }
     }
 }

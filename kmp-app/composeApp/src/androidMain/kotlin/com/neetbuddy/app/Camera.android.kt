@@ -145,16 +145,16 @@ private fun CameraContent(onImageCaptured: (base64: String) -> Unit) {
             )
             Text(
                 "Position question here",
-                color = Color.White.copy(alpha = 0.8f),
-                style = MaterialTheme.typography.labelSmall,
+                color = Color.White.copy(alpha = 0.96f),
+                style = MaterialTheme.typography.labelMedium,
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .padding(bottom = 30.dp)
                     .background(
-                        Color.Black.copy(alpha = 0.5f),
+                        Color.Black.copy(alpha = 0.68f),
                         RoundedCornerShape(6.dp),
                     )
-                    .padding(horizontal = 12.dp, vertical = 4.dp),
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
             )
         }
 

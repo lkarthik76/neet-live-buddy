@@ -38,6 +38,7 @@ data class UsageInfo(
     val used: Int = 0,
     val limit: Int = 10,
     val tier: String = "free",
+    val email: String = "",
     val resetsAt: String = ""
 )
 

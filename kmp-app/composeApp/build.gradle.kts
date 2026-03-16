@@ -71,7 +71,7 @@ android {
         versionCode = 1
         versionName = "1.0.0"
 
-        buildConfigField("String", "BACKEND_URL", "\"https://neet-live-buddy-go-tutor-1092451837072.asia-south1.run.app\"")
+        buildConfigField("String", "BACKEND_URL", "\"https://smart-study-buddy-go-tutor-567474220033.asia-south1.run.app\"")
     }
 
     signingConfigs {

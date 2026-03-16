@@ -8,7 +8,7 @@ if [[ -z "${GOOGLE_CLOUD_PROJECT:-}" ]]; then
 fi
 
 REGION="${GOOGLE_CLOUD_REGION:-asia-south1}"
-SERVICE_NAME="${SERVICE_NAME:-neet-live-buddy}"
+SERVICE_NAME="${SERVICE_NAME:-smart-study-buddy}"
 
 echo "Using project: ${GOOGLE_CLOUD_PROJECT}"
 echo "Using region:  ${REGION}"

@@ -12,8 +12,8 @@ if [[ -z "${GOOGLE_GENAI_API_KEY:-}" ]]; then
 fi
 
 REGION="${GOOGLE_CLOUD_REGION:-asia-south1}"
-GO_SERVICE_NAME="${GO_TUTOR_SERVICE_NAME:-neet-live-buddy-go-tutor}"
-WEB_SERVICE_NAME="${SERVICE_NAME:-neet-live-buddy-web}"
+GO_SERVICE_NAME="${GO_TUTOR_SERVICE_NAME:-smart-study-buddy-go-tutor}"
+WEB_SERVICE_NAME="${SERVICE_NAME:-smart-study-buddy-web}"
 
 echo "Deploying Go tutor service..."
 ./infra/deploy-go-tutor.sh
