@@ -1,8 +1,22 @@
 package com.neetbuddy.app
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -10,306 +24,569 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
 
-private val Primary = Color(0xFF0F172A)
-private val Surface = Color(0xFFF8FAFC)
-private val CardBg = Color.White
-private val Accent = Color(0xFF2563EB)
-private val SuccessGreen = Color(0xFF16A34A)
-
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun NeetLiveBuddyApp() {
-    MaterialTheme {
+    NeetBuddyTheme {
         val api = remember { TutorApi() }
         val voicePlayer = rememberVoicePlayer()
         val scope = rememberCoroutineScope()
         val state = AppState
+        val snackbarHostState = remember { SnackbarHostState() }
+        val scrollState = rememberScrollState()
 
-        val baseUrl = "https://neet-live-buddy-go-tutor-1092451837072.asia-south1.run.app"
+        val baseUrl = getBackendUrl()
 
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(Surface)
-                .verticalScroll(rememberScrollState())
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
-        ) {
-            Text(
-                "NEET Live Buddy",
-                fontWeight = FontWeight.Bold,
-                fontSize = 22.sp,
-                color = Primary
-            )
-            Text(
-                "Scan question \u00b7 Speak doubt \u00b7 Get instant explanation",
-                fontSize = 13.sp,
-                color = Color.Gray
-            )
-
-            CardSection("Select Language") {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    listOf("english" to "English", "hindi" to "\u0939\u093f\u0928\u094d\u0926\u0940", "tamil" to "\u0ba4\u0bae\u0bbf\u0bb4\u0bcd").forEach { (key, label) ->
-                        FilterChip(
-                            selected = state.language == key,
-                            onClick = { state.language = key },
-                            label = { Text(label, fontWeight = FontWeight.SemiBold) },
-                            colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = Accent,
-                                selectedLabelColor = Color.White
-                            )
-                        )
-                    }
-                }
-            }
-
-            CardSection("Select Subject") {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    listOf("physics" to "Physics", "chemistry" to "Chemistry", "biology" to "Biology").forEach { (key, label) ->
-                        FilterChip(
-                            selected = state.subject == key,
-                            onClick = { state.subject = key },
-                            label = { Text(label) },
-                            colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = Primary,
-                                selectedLabelColor = Color.White
-                            )
-                        )
-                    }
-                }
-            }
-
-            CardSection("\uD83D\uDCF7 Scan Question") {
-                CameraPreviewSection(onImageCaptured = { base64 ->
-                    state.imageBase64 = base64
-                })
-                if (state.imageBase64.isNotBlank()) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text("\u2705 Image captured (${state.imageBase64.length / 1024}KB)", color = SuccessGreen, fontSize = 12.sp)
-                        Button(
-                            onClick = { state.imageBase64 = "" },
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626)),
-                            shape = RoundedCornerShape(8.dp)
-                        ) {
-                            Text("\u2715 Clear", fontSize = 12.sp)
-                        }
-                    }
-                }
-            }
-
-            CardSection("\uD83C\uDFA4 Ask by Voice") {
-                SpeechInputButton(language = state.language, onTranscript = { transcript ->
-                    state.prompt = transcript
-                })
-                if (state.prompt.isNotBlank()) {
-                    Text("Transcript: ${state.prompt}", fontSize = 12.sp, color = Color.Gray)
-                }
-            }
-
-            CardSection("\u270F\uFE0F Or Type Your Doubt") {
-                OutlinedTextField(
-                    value = state.prompt,
-                    onValueChange = { state.prompt = it },
-                    label = { Text("Question / doubt") },
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    FilterChip(
-                        selected = state.confused,
-                        onClick = { state.confused = !state.confused },
-                        label = { Text(if (state.confused) "Confused mode ON" else "Confused mode OFF") },
-                        colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = Color(0xFFFBBF24),
-                            selectedLabelColor = Primary
-                        )
-                    )
-                }
-            }
-
-            val hasInput = state.prompt.isNotBlank() || state.imageBase64.isNotBlank()
-            Button(
-                enabled = !state.loading && hasInput,
-                onClick = {
-                    state.loading = true
-                    state.error = ""
-                    state.result = null
-                    val effectivePrompt = state.prompt.ifBlank { "Explain this question step by step" }
-                    scope.launch {
-                        try {
-                            val response = api.askTutor(
-                                baseUrl = baseUrl,
-                                request = TutorRequest(
-                                    prompt = effectivePrompt,
-                                    subjectHint = state.subject,
-                                    language = state.language,
-                                    confused = state.confused,
-                                    imageBase64 = state.imageBase64
-                                )
-                            )
-                            state.result = response
-                            voicePlayer.speak(response.answer, state.language)
-                        } catch (e: Exception) {
-                            state.error = e.message ?: "Request failed"
-                        } finally {
-                            state.loading = false
-                        }
-                    }
-                },
-                colors = ButtonDefaults.buttonColors(containerColor = Accent),
-                modifier = Modifier.fillMaxWidth().height(50.dp),
-                shape = RoundedCornerShape(12.dp)
-            ) {
-                Text("Ask Live Buddy", fontWeight = FontWeight.Bold, fontSize = 16.sp)
-            }
-
-            if (state.loading) {
-                CircularProgressIndicator(modifier = Modifier.align(Alignment.CenterHorizontally))
-            }
+        LaunchedEffect(state.error) {
             if (state.error.isNotBlank()) {
-                Text("Error: ${state.error}", color = Color.Red)
+                snackbarHostState.showSnackbar(state.error)
+                state.error = ""
             }
+        }
 
-            state.result?.let { res ->
-                CardSection("\uD83D\uDCA1 ${res.chapter}") {
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        if (res.difficulty.isNotBlank()) {
-                            val diffColor = when (res.difficulty.lowercase()) {
-                                "easy" -> SuccessGreen
-                                "hard" -> Color(0xFFDC2626)
-                                else -> Color(0xFFF59E0B)
-                            }
+        Scaffold(
+            snackbarHost = { SnackbarHost(snackbarHostState) },
+            topBar = {
+                TopAppBar(
+                    title = {
+                        Column {
                             Text(
-                                res.difficulty,
-                                color = diffColor,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 13.sp
+                                "NEET Live Buddy",
+                                style = MaterialTheme.typography.headlineSmall,
+                                color = Color.White,
+                            )
+                            Text(
+                                "AI-Powered NEET Exam Tutor",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Color.White.copy(alpha = 0.7f),
                             )
                         }
-                        if (res.correctOption.isNotBlank()) {
-                            Text(
-                                "Correct: (${res.correctOption})",
-                                color = SuccessGreen,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 13.sp
-                            )
-                        }
-                    }
-                    if (res.ncertReference.isNotBlank()) {
-                        Text(
-                            "NCERT: ${res.ncertReference}",
-                            fontSize = 12.sp,
-                            color = Accent,
-                            fontWeight = FontWeight.SemiBold
+                    },
+                    actions = {
+                        LanguagePill(
+                            selected = state.language,
+                            onSelect = { state.language = it },
                         )
-                    }
-                    Text(res.answer, lineHeight = 22.sp)
-                }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = MaterialTheme.colorScheme.primary,
+                    ),
+                )
+            },
+        ) { padding ->
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(MaterialTheme.colorScheme.background)
+                    .padding(padding)
+                    .verticalScroll(scrollState)
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                SubjectSelector(
+                    selected = state.subject,
+                    onSelect = { state.subject = it },
+                )
 
-                if (res.options.isNotEmpty()) {
-                    Spacer(Modifier.height(4.dp))
-                    CardSection("\uD83D\uDD0D Option Analysis") {
-                        res.options.forEach { opt ->
-                            val icon = if (opt.correct) "\u2705" else "\u274C"
-                            val bg = if (opt.correct) Color(0xFFDCFCE7) else Color(0xFFFEF2F2)
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .background(bg, RoundedCornerShape(8.dp))
-                                    .padding(10.dp)
-                            ) {
-                                Text(
-                                    "$icon (${opt.option}) ${opt.text}",
-                                    fontWeight = FontWeight.SemiBold,
-                                    fontSize = 14.sp
+                InputCard(state)
+
+                AskButton(
+                    loading = state.loading,
+                    hasInput = state.prompt.isNotBlank() || state.imageBase64.isNotBlank(),
+                    onClick = {
+                        state.loading = true
+                        state.error = ""
+                        state.result = null
+                        val effectivePrompt =
+                            state.prompt.ifBlank { "Explain this question step by step" }
+                        scope.launch {
+                            try {
+                                val response = api.askTutor(
+                                    baseUrl = baseUrl,
+                                    request = TutorRequest(
+                                        prompt = effectivePrompt,
+                                        subjectHint = state.subject,
+                                        language = state.language,
+                                        confused = state.confused,
+                                        imageBase64 = state.imageBase64,
+                                    ),
                                 )
-                                Text(opt.explanation, fontSize = 13.sp, lineHeight = 20.sp)
+                                state.result = response
+                                voicePlayer.speak(response.answer, state.language)
+                            } catch (e: Exception) {
+                                state.error = e.message ?: "Request failed"
+                            } finally {
+                                state.loading = false
                             }
-                            Spacer(Modifier.height(6.dp))
                         }
-                    }
-                }
+                    },
+                )
 
-                Spacer(Modifier.height(4.dp))
-                CardSection("\uD83D\uDCDD Revision Card") {
-                    if (res.revisionCard.concept.isNotBlank())
-                        RevisionRow("Concept", res.revisionCard.concept)
-                    if (res.revisionCard.keyPoint.isNotBlank())
-                        RevisionRow("Key Point", res.revisionCard.keyPoint)
-                    if (res.revisionCard.commonTrap.isNotBlank())
-                        RevisionRow("Common Trap", res.revisionCard.commonTrap)
-                    if (res.revisionCard.practiceQuestion.isNotBlank())
-                        RevisionRow("Practice Q", res.revisionCard.practiceQuestion)
-                }
-
-                Spacer(Modifier.height(8.dp))
-                Button(
-                    onClick = { state.clearAll() },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF64748B)),
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp)
+                AnimatedVisibility(
+                    visible = state.loading,
+                    enter = fadeIn() + expandVertically(),
+                    exit = fadeOut() + shrinkVertically(),
                 ) {
-                    Text("Ask Another Question", fontWeight = FontWeight.SemiBold)
+                    LoadingIndicator()
                 }
-            }
 
-            Spacer(Modifier.height(24.dp))
+                state.result?.let { res ->
+                    LaunchedEffect(res) {
+                        scrollState.animateScrollTo(scrollState.maxValue)
+                    }
+                    AnswerSection(res)
+                    AskAnotherButton { state.clearAll() }
+                }
+
+                Spacer(Modifier.height(16.dp))
+            }
         }
     }
 }
 
 @Composable
-private fun CardSection(title: String, content: @Composable () -> Unit) {
-    Column(
+private fun LanguagePill(selected: String, onSelect: (String) -> Unit) {
+    val langs = listOf("english" to "EN", "hindi" to "HI", "tamil" to "TA")
+    Row(
         modifier = Modifier
-            .fillMaxWidth()
-            .background(CardBg, RoundedCornerShape(14.dp))
-            .border(1.dp, Color(0xFFE2E8F0), RoundedCornerShape(14.dp))
-            .padding(14.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
+            .clip(RoundedCornerShape(20.dp))
+            .background(Color.White.copy(alpha = 0.15f))
+            .padding(horizontal = 4.dp, vertical = 2.dp),
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
     ) {
-        Text(title, fontWeight = FontWeight.SemiBold, fontSize = 15.sp, color = Primary)
-        content()
+        langs.forEach { (key, label) ->
+            val isSelected = selected == key
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelMedium,
+                color = if (isSelected) MaterialTheme.colorScheme.primary else Color.White,
+                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(if (isSelected) Color.White else Color.Transparent)
+                    .clickable { onSelect(key) }
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
+            )
+        }
     }
 }
 
 @Composable
-private fun RevisionRow(label: String, value: String) {
+private fun SubjectSelector(selected: String, onSelect: (String) -> Unit) {
+    val subjects = listOf(
+        "biology" to "Biology",
+        "physics" to "Physics",
+        "chemistry" to "Chemistry",
+    )
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        subjects.forEach { (key, label) ->
+            FilterChip(
+                selected = selected == key,
+                onClick = { onSelect(key) },
+                label = {
+                    Text(label, style = MaterialTheme.typography.labelLarge)
+                },
+                colors = FilterChipDefaults.filterChipColors(
+                    selectedContainerColor = MaterialTheme.colorScheme.primary,
+                    selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
+                ),
+                modifier = Modifier.weight(1f),
+            )
+        }
+    }
+}
+
+@Composable
+private fun InputCard(state: AppState) {
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface,
+        ),
+        shape = RoundedCornerShape(16.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(
+                "Scan or type your question",
+                style = MaterialTheme.typography.titleLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+
+            CameraPreviewSection(onImageCaptured = { base64 ->
+                state.imageBase64 = base64
+            })
+
+            if (state.imageBase64.isNotBlank()) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(10.dp)
+                                .clip(CircleShape)
+                                .background(SuccessGreen),
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            "Image captured (${state.imageBase64.length / 1024}KB)",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = SuccessGreen,
+                        )
+                    }
+                    Button(
+                        onClick = { state.imageBase64 = "" },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = ErrorRed,
+                        ),
+                        shape = RoundedCornerShape(8.dp),
+                    ) {
+                        Text("Clear", style = MaterialTheme.typography.labelMedium)
+                    }
+                }
+            }
+
+            SpeechInputButton(
+                language = state.language,
+                onTranscript = { state.prompt = it },
+            )
+
+            OutlinedTextField(
+                value = state.prompt,
+                onValueChange = { state.prompt = it },
+                label = { Text("Type your doubt here...") },
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+                minLines = 2,
+            )
+
+            FilterChip(
+                selected = state.confused,
+                onClick = { state.confused = !state.confused },
+                label = {
+                    Text(
+                        if (state.confused) "Confused mode ON" else "Confused mode OFF",
+                        style = MaterialTheme.typography.labelMedium,
+                    )
+                },
+                colors = FilterChipDefaults.filterChipColors(
+                    selectedContainerColor = Gold,
+                    selectedLabelColor = Navy,
+                ),
+            )
+        }
+    }
+}
+
+@Composable
+private fun AskButton(loading: Boolean, hasInput: Boolean, onClick: () -> Unit) {
+    Button(
+        enabled = !loading && hasInput,
+        onClick = onClick,
+        colors = ButtonDefaults.buttonColors(
+            containerColor = Orange,
+            contentColor = Color.White,
+        ),
+        modifier = Modifier.fillMaxWidth().height(52.dp),
+        shape = RoundedCornerShape(14.dp),
+    ) {
+        Text(
+            "Ask Live Buddy",
+            style = MaterialTheme.typography.titleLarge,
+            color = Color.White,
+        )
+    }
+}
+
+@Composable
+private fun LoadingIndicator() {
+    val transition = rememberInfiniteTransition(label = "loading")
+    val alpha by transition.animateFloat(
+        initialValue = 0.3f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(800, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "pulse",
+    )
+
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer,
+        ),
+        shape = RoundedCornerShape(16.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(
+            modifier = Modifier.padding(24.dp).fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                "Gemini is thinking...",
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.primary.copy(alpha = alpha),
+            )
+            Text(
+                "Analyzing with NCERT knowledge base",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.6f),
+            )
+        }
+    }
+}
+
+@Composable
+private fun AnswerSection(res: TutorResponse) {
+    Column(
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+        modifier = Modifier.animateContentSize(),
+    ) {
+        Card(
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surface,
+            ),
+            shape = RoundedCornerShape(16.dp),
+            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Row(
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(
+                        res.chapter,
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
+
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (res.difficulty.isNotBlank()) {
+                        DifficultyBadge(res.difficulty)
+                    }
+                    if (res.correctOption.isNotBlank()) {
+                        Badge(
+                            text = "Correct: (${res.correctOption})",
+                            bgColor = Color(0xFFDCFCE7),
+                            textColor = SuccessGreen,
+                        )
+                    }
+                }
+
+                if (res.ncertReference.isNotBlank()) {
+                    Text(
+                        res.ncertReference,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
+
+                Text(
+                    res.answer,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+            }
+        }
+
+        if (res.options.isNotEmpty()) {
+            CollapsibleCard(title = "Option Analysis", defaultExpanded = true) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    res.options.forEach { opt ->
+                        val bg = if (opt.correct) Color(0xFFDCFCE7) else Color(0xFFFEF2F2)
+                        val icon = if (opt.correct) "✅" else "❌"
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(bg, RoundedCornerShape(10.dp))
+                                .padding(12.dp),
+                        ) {
+                            Text(
+                                "$icon (${opt.option}) ${opt.text}",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                            Text(
+                                opt.explanation,
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        CollapsibleCard(title = "Revision Card") {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (res.revisionCard.concept.isNotBlank())
+                    LabeledField("Concept", res.revisionCard.concept)
+                if (res.revisionCard.keyPoint.isNotBlank())
+                    LabeledField("Key Point", res.revisionCard.keyPoint)
+                if (res.revisionCard.commonTrap.isNotBlank())
+                    LabeledField("Common Trap", res.revisionCard.commonTrap)
+                if (res.revisionCard.practiceQuestion.isNotBlank())
+                    LabeledField("Practice Question", res.revisionCard.practiceQuestion)
+            }
+        }
+    }
+}
+
+@Composable
+private fun CollapsibleCard(
+    title: String,
+    defaultExpanded: Boolean = false,
+    content: @Composable () -> Unit,
+) {
+    var expanded by remember { mutableStateOf(defaultExpanded) }
+
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface,
+        ),
+        shape = RoundedCornerShape(16.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(
+            modifier = Modifier.animateContentSize(),
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { expanded = !expanded }
+                    .padding(16.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    title,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                Icon(
+                    imageVector = if (expanded) Icons.Default.KeyboardArrowUp else Icons.Default.ArrowDropDown,
+                    contentDescription = if (expanded) "Collapse" else "Expand",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            AnimatedVisibility(visible = expanded) {
+                Column(
+                    modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 16.dp),
+                ) {
+                    content()
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DifficultyBadge(difficulty: String) {
+    val (bgColor, textColor) = when (difficulty.lowercase()) {
+        "easy" -> Color(0xFFDCFCE7) to SuccessGreen
+        "hard" -> Color(0xFFFEF2F2) to ErrorRed
+        else -> Color(0xFFFEF9C3) to Color(0xFFCA8A04)
+    }
+    Badge(text = difficulty, bgColor = bgColor, textColor = textColor)
+}
+
+@Composable
+private fun Badge(text: String, bgColor: Color, textColor: Color) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.labelMedium,
+        color = textColor,
+        fontWeight = FontWeight.Bold,
+        modifier = Modifier
+            .background(bgColor, RoundedCornerShape(8.dp))
+            .padding(horizontal = 10.dp, vertical = 4.dp),
+    )
+}
+
+@Composable
+private fun LabeledField(label: String, value: String) {
     Column {
-        Text(label, fontWeight = FontWeight.SemiBold, fontSize = 12.sp, color = Color.Gray)
-        Text(value, fontSize = 14.sp)
+        Text(
+            label,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            value,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+    }
+}
+
+@Composable
+private fun AskAnotherButton(onClick: () -> Unit) {
+    OutlinedButton(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(14.dp),
+    ) {
+        Text(
+            "Ask Another Question",
+            style = MaterialTheme.typography.titleMedium,
+        )
     }
 }

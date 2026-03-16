@@ -8,6 +8,9 @@ kmp-app/.gradle
 kmp-app/.idea
 kmp-app/local.properties
 kmp-app/**/build
+kmp-app/keystore.properties
+*.jks
+*.keystore
 
 # Python
 __pycache__

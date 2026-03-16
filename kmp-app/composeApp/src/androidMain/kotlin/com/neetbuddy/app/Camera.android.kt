@@ -12,17 +12,21 @@ import androidx.camera.core.ImageProxy
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -57,14 +61,15 @@ actual fun CameraPreviewSection(onImageCaptured: (base64: String) -> Unit) {
     } else {
         Column(
             modifier = Modifier.fillMaxWidth().padding(8.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
+            horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             val msg = if (cameraPermission.status.shouldShowRationale) {
                 "Camera access is needed to scan questions. Please grant permission."
             } else {
                 "Tap below to enable camera for scanning questions."
             }
-            Text(msg, fontSize = 13.sp, color = Color.Gray)
+            Text(msg, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(Modifier.height(8.dp))
             Button(onClick = { cameraPermission.launchPermissionRequest() }) {
                 Text("Grant Camera Permission")
             }
@@ -91,7 +96,7 @@ private fun CameraContent(onImageCaptured: (base64: String) -> Unit) {
             modifier = Modifier
                 .fillMaxWidth()
                 .height(260.dp)
-                .clip(RoundedCornerShape(12.dp))
+                .clip(RoundedCornerShape(12.dp)),
         ) {
             AndroidView(
                 factory = { ctx ->
@@ -107,8 +112,8 @@ private fun CameraContent(onImageCaptured: (base64: String) -> Unit) {
                             .setResolutionStrategy(
                                 ResolutionStrategy(
                                     Size(1280, 960),
-                                    ResolutionStrategy.FALLBACK_RULE_CLOSEST_LOWER_THEN_HIGHER
-                                )
+                                    ResolutionStrategy.FALLBACK_RULE_CLOSEST_LOWER_THEN_HIGHER,
+                                ),
                             )
                             .build()
                         val capture = ImageCapture.Builder()
@@ -128,9 +133,32 @@ private fun CameraContent(onImageCaptured: (base64: String) -> Unit) {
                     }, ContextCompat.getMainExecutor(ctx))
                     previewView
                 },
-                modifier = Modifier.matchParentSize()
+                modifier = Modifier.matchParentSize(),
+            )
+
+            // Viewfinder overlay
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .padding(24.dp)
+                    .border(2.dp, Color.White.copy(alpha = 0.6f), RoundedCornerShape(8.dp)),
+            )
+            Text(
+                "Position question here",
+                color = Color.White.copy(alpha = 0.8f),
+                style = MaterialTheme.typography.labelSmall,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 30.dp)
+                    .background(
+                        Color.Black.copy(alpha = 0.5f),
+                        RoundedCornerShape(6.dp),
+                    )
+                    .padding(horizontal = 12.dp, vertical = 4.dp),
             )
         }
+
+        Spacer(Modifier.height(8.dp))
 
         Button(
             onClick = {
@@ -148,13 +176,17 @@ private fun CameraContent(onImageCaptured: (base64: String) -> Unit) {
                         override fun onError(exception: ImageCaptureException) {
                             Log.e("NeetCamera", "Capture failed", exception)
                         }
-                    }
+                    },
                 )
             },
             enabled = cameraReady,
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier.fillMaxWidth(),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = MaterialTheme.colorScheme.secondary,
+            ),
+            shape = RoundedCornerShape(10.dp),
         ) {
-            Text("\uD83D\uDCF7 Capture Question")
+            Text("Capture Question", style = MaterialTheme.typography.labelLarge)
         }
     }
 }
@@ -165,12 +197,14 @@ private fun imageProxyToBase64(imageProxy: ImageProxy): String? {
     buffer.get(bytes)
     val original = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return null
     val resized = resizeBitmap(original, maxDimension = 1024)
+    val w = resized.width
+    val h = resized.height
     if (resized != original) original.recycle()
     val stream = ByteArrayOutputStream()
     resized.compress(Bitmap.CompressFormat.JPEG, 80, stream)
     val b64 = Base64.encodeToString(stream.toByteArray(), Base64.NO_WRAP)
     resized.recycle()
-    Log.d("NeetCamera", "Image resized to ${resized.width}x${resized.height}, base64 size: ${b64.length / 1024}KB")
+    Log.d("NeetCamera", "Image resized to ${w}x${h}, base64 size: ${b64.length / 1024}KB")
     return b64
 }
 
