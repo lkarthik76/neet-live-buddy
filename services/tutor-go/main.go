@@ -18,6 +18,7 @@ import (
 )
 
 type TutorRequest struct {
+	DeviceId     string `json:"deviceId,omitempty"`
 	Prompt       string `json:"prompt"`
 	SubjectHint  string `json:"subjectHint,omitempty"`
 	Language     string `json:"language"`
@@ -48,6 +49,7 @@ type TutorResponse struct {
 	Difficulty     string           `json:"difficulty,omitempty"`
 	NcertReference string           `json:"ncertReference,omitempty"`
 	RevisionCard   RevisionCard     `json:"revisionCard"`
+	Usage          *UsageInfo       `json:"usage,omitempty"`
 }
 
 type ChapterEntry struct {
@@ -649,7 +651,7 @@ func downloadIndexFromGCSIfConfigured(localPath string) string {
 	return localPath
 }
 
-func tutorHandler(gemini *GeminiClient) http.HandlerFunc {
+func tutorHandler(gemini *GeminiClient, tracker *UsageTracker) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -672,6 +674,23 @@ func tutorHandler(gemini *GeminiClient) http.HandlerFunc {
 		}
 		req.Language = normalizedLang
 
+		deviceId := strings.TrimSpace(req.DeviceId)
+		if deviceId == "" {
+			deviceId = "anonymous"
+		}
+
+		usage, allowed := tracker.CheckAndIncrement(deviceId)
+		if !allowed {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusTooManyRequests)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"error":   "daily_limit_reached",
+				"message": "You've used all your free questions for today. Upgrade to Pro for unlimited access!",
+				"usage":   usage,
+			})
+			return
+		}
+
 		var res TutorResponse
 		if gemini.IsConfigured() {
 			ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
@@ -688,8 +707,26 @@ func tutorHandler(gemini *GeminiClient) http.HandlerFunc {
 			res = createFallbackResponse(req)
 		}
 
+		if usage.Tier == TierFree {
+			res = StripForFreeTier(res)
+		}
+
+		res.Usage = &usage
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(res)
+	}
+}
+
+func usageHandler(tracker *UsageTracker) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		deviceId := strings.TrimSpace(r.URL.Query().Get("deviceId"))
+		if deviceId == "" {
+			http.Error(w, "deviceId query parameter is required", http.StatusBadRequest)
+			return
+		}
+		usage := tracker.GetUsage(deviceId)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(usage)
 	}
 }
 
@@ -700,10 +737,12 @@ func main() {
 	indexPath = downloadIndexFromGCSIfConfigured(indexPath)
 	retriever := LoadRetriever(indexPath)
 	gemini := NewGeminiClientFromEnv(content, retriever)
+	tracker := NewUsageTracker()
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", healthHandler)
 	mux.HandleFunc("GET /", healthHandler)
-	mux.HandleFunc("POST /tutor", tutorHandler(gemini))
+	mux.HandleFunc("GET /usage", usageHandler(tracker))
+	mux.HandleFunc("POST /tutor", tutorHandler(gemini, tracker))
 
 	port := os.Getenv("PORT")
 	if port == "" {

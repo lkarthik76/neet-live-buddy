@@ -79,6 +79,14 @@ fun NeetLiveBuddyApp() {
         val scrollState = rememberScrollState()
 
         val baseUrl = getBackendUrl()
+        val deviceId = remember { getDeviceId() }
+
+        LaunchedEffect(Unit) {
+            try {
+                val usage = api.getUsage(baseUrl, deviceId)
+                state.updateUsage(usage)
+            } catch (_: Exception) { }
+        }
 
         LaunchedEffect(state.error) {
             if (state.error.isNotBlank()) {
@@ -106,6 +114,10 @@ fun NeetLiveBuddyApp() {
                         }
                     },
                     actions = {
+                        if (state.isFreeTier && state.dailyLimit > 0) {
+                            UsageBadge(used = state.dailyUsed, limit = state.dailyLimit)
+                            Spacer(Modifier.width(8.dp))
+                        }
                         LanguagePill(
                             selected = state.language,
                             onSelect = { state.language = it },
@@ -126,6 +138,13 @@ fun NeetLiveBuddyApp() {
                     .padding(horizontal = 16.dp, vertical = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
+                if (state.isFreeTier) {
+                    FreeTierBanner(
+                        questionsLeft = state.questionsRemaining,
+                        onUpgradeClick = { state.showUpgradePrompt = true },
+                    )
+                }
+
                 SubjectSelector(
                     selected = state.subject,
                     onSelect = { state.subject = it },
@@ -147,6 +166,7 @@ fun NeetLiveBuddyApp() {
                                 val response = api.askTutor(
                                     baseUrl = baseUrl,
                                     request = TutorRequest(
+                                        deviceId = deviceId,
                                         prompt = effectivePrompt,
                                         subjectHint = state.subject,
                                         language = state.language,
@@ -155,7 +175,12 @@ fun NeetLiveBuddyApp() {
                                     ),
                                 )
                                 state.result = response
+                                state.updateUsage(response.usage)
                                 voicePlayer.speak(response.answer, state.language)
+                            } catch (e: DailyLimitReachedException) {
+                                state.updateUsage(e.usage)
+                                state.showUpgradePrompt = true
+                                state.error = e.message ?: "Daily limit reached"
                             } catch (e: Exception) {
                                 state.error = e.message ?: "Request failed"
                             } finally {
@@ -173,10 +198,21 @@ fun NeetLiveBuddyApp() {
                     LoadingIndicator()
                 }
 
+                AnimatedVisibility(visible = state.showUpgradePrompt) {
+                    UpgradePromptCard(
+                        onDismiss = { state.showUpgradePrompt = false },
+                    )
+                }
+
                 state.result?.let { res ->
                     LaunchedEffect(res) {
                         scrollState.animateScrollTo(scrollState.maxValue)
                     }
+
+                    if (state.isFreeTier) {
+                        FreeUpsellBanner()
+                    }
+
                     AnswerSection(res)
                     AskAnotherButton { state.clearAll() }
                 }
@@ -588,5 +624,189 @@ private fun AskAnotherButton(onClick: () -> Unit) {
             "Ask Another Question",
             style = MaterialTheme.typography.titleMedium,
         )
+    }
+}
+
+@Composable
+private fun UsageBadge(used: Int, limit: Int) {
+    val remaining = (limit - used).coerceAtLeast(0)
+    val bgColor = when {
+        remaining <= 2 -> ErrorRed
+        remaining <= 5 -> Gold
+        else -> SuccessGreen
+    }
+    Text(
+        text = "$remaining/$limit",
+        style = MaterialTheme.typography.labelMedium,
+        fontWeight = FontWeight.Bold,
+        color = Color.White,
+        modifier = Modifier
+            .background(bgColor.copy(alpha = 0.9f), RoundedCornerShape(12.dp))
+            .padding(horizontal = 10.dp, vertical = 4.dp),
+    )
+}
+
+@Composable
+private fun FreeTierBanner(questionsLeft: Int, onUpgradeClick: () -> Unit) {
+    val bannerColor = when {
+        questionsLeft <= 2 -> ErrorRed
+        questionsLeft <= 5 -> Gold
+        else -> MaterialTheme.colorScheme.primary
+    }
+    Card(
+        colors = CardDefaults.cardColors(containerColor = bannerColor.copy(alpha = 0.1f)),
+        shape = RoundedCornerShape(12.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(
+            modifier = Modifier.padding(12.dp).fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    "Free Plan — $questionsLeft questions left today",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = bannerColor,
+                )
+                Text(
+                    "Upgrade to Pro for unlimited questions + detailed analysis",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Button(
+                onClick = onUpgradeClick,
+                colors = ButtonDefaults.buttonColors(containerColor = Orange),
+                shape = RoundedCornerShape(10.dp),
+            ) {
+                Text("Upgrade", style = MaterialTheme.typography.labelMedium)
+            }
+        }
+    }
+}
+
+@Composable
+private fun UpgradePromptCard(onDismiss: () -> Unit) {
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.secondaryContainer,
+        ),
+        shape = RoundedCornerShape(16.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(
+            modifier = Modifier.padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text(
+                "Upgrade to NEET Pro",
+                style = MaterialTheme.typography.headlineSmall,
+                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                textAlign = TextAlign.Center,
+            )
+            Text(
+                "Get unlimited questions, option-by-option analysis, " +
+                    "NCERT references, and full revision cards.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.8f),
+                textAlign = TextAlign.Center,
+            )
+
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                PricingOption(
+                    name = "Pro",
+                    price = "Rs 99/month",
+                    features = "Unlimited questions, full analysis, revision cards",
+                    highlighted = true,
+                )
+                PricingOption(
+                    name = "Ultimate",
+                    price = "Rs 299/month",
+                    features = "Everything in Pro + practice tests, analytics, offline",
+                    highlighted = false,
+                )
+            }
+
+            Text(
+                "Coming soon to Google Play Store",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.5f),
+            )
+
+            OutlinedButton(
+                onClick = onDismiss,
+                shape = RoundedCornerShape(10.dp),
+            ) {
+                Text("Maybe Later")
+            }
+        }
+    }
+}
+
+@Composable
+private fun PricingOption(
+    name: String,
+    price: String,
+    features: String,
+    highlighted: Boolean,
+) {
+    val containerColor = if (highlighted) Orange else MaterialTheme.colorScheme.surface
+    val contentColor = if (highlighted) Color.White else MaterialTheme.colorScheme.onSurface
+    Card(
+        colors = CardDefaults.cardColors(containerColor = containerColor),
+        shape = RoundedCornerShape(12.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(
+            modifier = Modifier.padding(14.dp).fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    name,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = contentColor,
+                )
+                Text(
+                    features,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = contentColor.copy(alpha = 0.8f),
+                )
+            }
+            Text(
+                price,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = contentColor,
+            )
+        }
+    }
+}
+
+@Composable
+private fun FreeUpsellBanner() {
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = Color(0xFFFFF7ED),
+        ),
+        shape = RoundedCornerShape(12.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(
+            modifier = Modifier.padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                "Upgrade to Pro to unlock option analysis, NCERT references, " +
+                    "and detailed revision cards for every answer.",
+                style = MaterialTheme.typography.bodySmall,
+                color = OrangeDark,
+            )
+        }
     }
 }

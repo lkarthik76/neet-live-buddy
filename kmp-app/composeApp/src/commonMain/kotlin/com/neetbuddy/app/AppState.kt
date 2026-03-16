@@ -14,11 +14,28 @@ object AppState {
     var result by mutableStateOf<TutorResponse?>(null)
     var error by mutableStateOf("")
 
+    // Usage & tier state
+    var dailyUsed by mutableStateOf(0)
+    var dailyLimit by mutableStateOf(10)
+    var tier by mutableStateOf("free")
+    var showUpgradePrompt by mutableStateOf(false)
+
+    val isFreeTier: Boolean get() = tier == "free"
+    val questionsRemaining: Int get() = if (dailyLimit < 0) Int.MAX_VALUE else (dailyLimit - dailyUsed).coerceAtLeast(0)
+
+    fun updateUsage(usage: UsageInfo?) {
+        if (usage == null) return
+        dailyUsed = usage.used
+        dailyLimit = usage.limit
+        tier = usage.tier
+    }
+
     fun clearAll() {
         prompt = ""
         imageBase64 = ""
         result = null
         error = ""
         confused = false
+        showUpgradePrompt = false
     }
 }

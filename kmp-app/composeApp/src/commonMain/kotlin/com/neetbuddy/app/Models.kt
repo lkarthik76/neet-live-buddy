@@ -5,6 +5,7 @@ import kotlinx.serialization.Serializable
 
 @Serializable
 data class TutorRequest(
+    val deviceId: String = "",
     val prompt: String,
     @SerialName("subjectHint")
     val subjectHint: String,
@@ -33,6 +34,14 @@ data class RevisionCard(
 )
 
 @Serializable
+data class UsageInfo(
+    val used: Int = 0,
+    val limit: Int = 10,
+    val tier: String = "free",
+    val resetsAt: String = ""
+)
+
+@Serializable
 data class TutorResponse(
     val answer: String,
     val chapter: String,
@@ -40,5 +49,13 @@ data class TutorResponse(
     val options: List<OptionAnalysis> = emptyList(),
     val difficulty: String = "",
     val ncertReference: String = "",
-    val revisionCard: RevisionCard = RevisionCard()
+    val revisionCard: RevisionCard = RevisionCard(),
+    val usage: UsageInfo? = null
+)
+
+@Serializable
+data class UsageLimitError(
+    val error: String = "",
+    val message: String = "",
+    val usage: UsageInfo? = null
 )
