@@ -48,6 +48,7 @@ kotlin {
             implementation("androidx.activity:activity-compose:1.9.3")
             implementation("androidx.core:core-splashscreen:1.0.1")
             implementation("io.ktor:ktor-client-okhttp:2.3.12")
+            implementation("com.android.billingclient:billing-ktx:7.1.1")
             implementation("androidx.camera:camera-core:1.4.1")
             implementation("androidx.camera:camera-camera2:1.4.1")
             implementation("androidx.camera:camera-lifecycle:1.4.1")
@@ -61,11 +62,11 @@ kotlin {
 }
 
 android {
-    namespace = "com.neetbuddy.app"
+    namespace = "com.smartstudybuddy.app"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.neetbuddy.app"
+        applicationId = "com.smartstudybuddy.app"
         minSdk = 26
         targetSdk = 35
         versionCode = 1

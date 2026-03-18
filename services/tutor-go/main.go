@@ -15,6 +15,9 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"google.golang.org/api/androidpublisher/v3"
+	"google.golang.org/api/option"
 )
 
 type TutorRequest struct {
@@ -741,6 +744,21 @@ type tierRequest struct {
 	Tier     string `json:"tier"`
 }
 
+type googleVerifyRequest struct {
+	DeviceId      string `json:"deviceId"`
+	Email         string `json:"email"`
+	ProductId     string `json:"productId"`
+	PurchaseToken string `json:"purchaseToken"`
+	PackageName   string `json:"packageName"`
+}
+
+type appleVerifyRequest struct {
+	DeviceId    string `json:"deviceId"`
+	Email       string `json:"email"`
+	ProductId   string `json:"productId"`
+	ReceiptData string `json:"receiptData"`
+}
+
 func linkEmailHandler(tracker *UsageTracker) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req linkRequest
@@ -826,6 +844,278 @@ func tierHandler(tracker *UsageTracker) http.HandlerFunc {
 	}
 }
 
+func tierFromProductID(productID string) (Tier, bool) {
+	switch strings.TrimSpace(productID) {
+	case "neet_pro_monthly":
+		return TierPro, true
+	case "neet_ultimate_monthly":
+		return TierUltimate, true
+	default:
+		return "", false
+	}
+}
+
+func isGoogleSubscriptionActive(state string) bool {
+	switch strings.TrimSpace(state) {
+	case "SUBSCRIPTION_STATE_ACTIVE", "SUBSCRIPTION_STATE_IN_GRACE_PERIOD", "SUBSCRIPTION_STATE_ON_HOLD":
+		return true
+	default:
+		return false
+	}
+}
+
+func verifyGoogleSubscription(ctx context.Context, packageName, purchaseToken, expectedProductId string) error {
+	if strings.TrimSpace(packageName) == "" || strings.TrimSpace(purchaseToken) == "" {
+		return errors.New("packageName and purchaseToken are required")
+	}
+
+	apiKey := strings.TrimSpace(os.Getenv("GOOGLE_PLAY_API_KEY"))
+	var (
+		service *androidpublisher.Service
+		err     error
+	)
+	if apiKey != "" {
+		service, err = androidpublisher.NewService(ctx, option.WithAPIKey(apiKey))
+	} else {
+		service, err = androidpublisher.NewService(ctx)
+	}
+	if err != nil {
+		return fmt.Errorf("google play service init failed: %w", err)
+	}
+
+	sub, err := service.Purchases.Subscriptionsv2.Get(packageName, purchaseToken).Do()
+	if err != nil {
+		return fmt.Errorf("play subscription lookup failed: %w", err)
+	}
+
+	if !isGoogleSubscriptionActive(sub.SubscriptionState) {
+		return fmt.Errorf("subscription is not active: %s", sub.SubscriptionState)
+	}
+
+	foundProduct := false
+	for _, item := range sub.LineItems {
+		if strings.TrimSpace(item.ProductId) == strings.TrimSpace(expectedProductId) {
+			foundProduct = true
+			break
+		}
+	}
+	if !foundProduct {
+		return fmt.Errorf("product mismatch: expected %s", expectedProductId)
+	}
+
+	return nil
+}
+
+func googleBillingVerifyHandler(tracker *UsageTracker) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var req googleVerifyRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid request body", http.StatusBadRequest)
+			return
+		}
+
+		deviceID := strings.TrimSpace(req.DeviceId)
+		email := strings.TrimSpace(req.Email)
+		if deviceID == "" || email == "" {
+			http.Error(w, "deviceId and email are required", http.StatusBadRequest)
+			return
+		}
+
+		tier, ok := tierFromProductID(req.ProductId)
+		if !ok {
+			http.Error(w, "unsupported productId", http.StatusBadRequest)
+			return
+		}
+
+		packageName := strings.TrimSpace(req.PackageName)
+		if packageName == "" {
+			packageName = strings.TrimSpace(os.Getenv("GOOGLE_PLAY_PACKAGE_NAME"))
+		}
+		if packageName == "" {
+			packageName = "com.smartstudybuddy.app"
+		}
+
+		verifyErr := verifyGoogleSubscription(
+			r.Context(),
+			packageName,
+			strings.TrimSpace(req.PurchaseToken),
+			strings.TrimSpace(req.ProductId),
+		)
+		if verifyErr != nil {
+			log.Printf("google purchase verify failed: %v", verifyErr)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusPaymentRequired)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"error":   "purchase_verification_failed",
+				"message": verifyErr.Error(),
+			})
+			return
+		}
+
+		tracker.LinkEmail(deviceID, email)
+		tracker.SetTierByEmail(email, tier)
+		usage := tracker.GetUsage(deviceID)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(usage)
+	}
+}
+
+func verifyAppleReceipt(receiptData, expectedProductID string) error {
+	sharedSecret := strings.TrimSpace(os.Getenv("APPLE_SHARED_SECRET"))
+	if sharedSecret == "" {
+		return errors.New("APPLE_SHARED_SECRET is not configured")
+	}
+	if strings.TrimSpace(receiptData) == "" {
+		return errors.New("receiptData is required")
+	}
+
+	payload := map[string]any{
+		"receipt-data":               receiptData,
+		"password":                   sharedSecret,
+		"exclude-old-transactions":   true,
+	}
+
+	callVerify := func(url string) (map[string]any, error) {
+		raw, _ := json.Marshal(payload)
+		req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(raw))
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Content-Type", "application/json")
+		client := &http.Client{Timeout: 30 * time.Second}
+		resp, err := client.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		defer resp.Body.Close()
+		body, _ := io.ReadAll(resp.Body)
+		if resp.StatusCode >= 400 {
+			return nil, fmt.Errorf("apple verify http %d: %s", resp.StatusCode, string(body))
+		}
+		var parsed map[string]any
+		if err := json.Unmarshal(body, &parsed); err != nil {
+			return nil, err
+		}
+		return parsed, nil
+	}
+
+	parsed, err := callVerify("https://buy.itunes.apple.com/verifyReceipt")
+	if err != nil {
+		return err
+	}
+	statusAny, ok := parsed["status"]
+	if !ok {
+		return errors.New("apple verify response missing status")
+	}
+	status := int(statusAny.(float64))
+	if status == 21007 {
+		parsed, err = callVerify("https://sandbox.itunes.apple.com/verifyReceipt")
+		if err != nil {
+			return err
+		}
+		status = int(parsed["status"].(float64))
+	}
+	if status != 0 {
+		return fmt.Errorf("apple verifyReceipt failed with status=%d", status)
+	}
+
+	nowMs := time.Now().UTC().UnixMilli()
+	productMatched := false
+	activeSubscription := false
+
+	if latestAny, ok := parsed["latest_receipt_info"]; ok {
+		if latest, ok := latestAny.([]any); ok {
+			for _, itemAny := range latest {
+				item, ok := itemAny.(map[string]any)
+				if !ok {
+					continue
+				}
+				pid := strings.TrimSpace(fmt.Sprint(item["product_id"]))
+				if pid != expectedProductID {
+					continue
+				}
+				productMatched = true
+				expMsRaw := strings.TrimSpace(fmt.Sprint(item["expires_date_ms"]))
+				if expMsRaw != "" {
+					if expMs, err := strconv.ParseInt(expMsRaw, 10, 64); err == nil && expMs > nowMs {
+						activeSubscription = true
+					}
+				}
+			}
+		}
+	}
+
+	if !productMatched {
+		// Fallback for non-renewing/non-subscription receipts.
+		if receiptAny, ok := parsed["receipt"]; ok {
+			if receiptMap, ok := receiptAny.(map[string]any); ok {
+				if inAppAny, ok := receiptMap["in_app"]; ok {
+					if inApp, ok := inAppAny.([]any); ok {
+						for _, itemAny := range inApp {
+							item, ok := itemAny.(map[string]any)
+							if !ok {
+								continue
+							}
+							pid := strings.TrimSpace(fmt.Sprint(item["product_id"]))
+							if pid == expectedProductID {
+								productMatched = true
+								activeSubscription = true
+								break
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	if !productMatched {
+		return fmt.Errorf("apple receipt product mismatch: expected %s", expectedProductID)
+	}
+	if !activeSubscription {
+		return errors.New("apple subscription is not active")
+	}
+	return nil
+}
+
+func appleBillingVerifyHandler(tracker *UsageTracker) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var req appleVerifyRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid request body", http.StatusBadRequest)
+			return
+		}
+		deviceID := strings.TrimSpace(req.DeviceId)
+		email := strings.TrimSpace(req.Email)
+		if deviceID == "" || email == "" {
+			http.Error(w, "deviceId and email are required", http.StatusBadRequest)
+			return
+		}
+		tier, ok := tierFromProductID(req.ProductId)
+		if !ok {
+			http.Error(w, "unsupported productId", http.StatusBadRequest)
+			return
+		}
+
+		if err := verifyAppleReceipt(strings.TrimSpace(req.ReceiptData), strings.TrimSpace(req.ProductId)); err != nil {
+			log.Printf("apple purchase verify failed: %v", err)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusPaymentRequired)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"error":   "purchase_verification_failed",
+				"message": err.Error(),
+			})
+			return
+		}
+
+		tracker.LinkEmail(deviceID, email)
+		tracker.SetTierByEmail(email, tier)
+		usage := tracker.GetUsage(deviceID)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(usage)
+	}
+}
+
 func main() {
 	content := loadContentStore()
 	contentDir := resolveContentDir()
@@ -842,6 +1132,8 @@ func main() {
 	mux.HandleFunc("POST /auth/link", linkEmailHandler(tracker))
 	mux.HandleFunc("POST /auth/restore", restoreHandler(tracker))
 	mux.HandleFunc("POST /tier", tierHandler(tracker))
+	mux.HandleFunc("POST /billing/google/verify", googleBillingVerifyHandler(tracker))
+	mux.HandleFunc("POST /billing/apple/verify", appleBillingVerifyHandler(tracker))
 
 	port := os.Getenv("PORT")
 	if port == "" {
