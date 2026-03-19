@@ -1359,11 +1359,15 @@ func requireBearerFromEnv(w http.ResponseWriter, r *http.Request, envKey string)
 		return false
 	}
 	authz := strings.TrimSpace(r.Header.Get("Authorization"))
-	if authz != "Bearer "+expected {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return false
+	if authz == "Bearer "+expected {
+		return true
 	}
-	return true
+	queryToken := strings.TrimSpace(r.URL.Query().Get("token"))
+	if queryToken == expected {
+		return true
+	}
+	http.Error(w, "unauthorized", http.StatusUnauthorized)
+	return false
 }
 
 func googleRTDNHandler(tracker *UsageTracker) http.HandlerFunc {

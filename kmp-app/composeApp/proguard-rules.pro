@@ -34,3 +34,6 @@
 # Compose
 -keep class androidx.compose.** { *; }
 -dontwarn androidx.compose.**
+
+# Firestore / gRPC logging backend shim
+-dontwarn org.slf4j.impl.StaticLoggerBinder

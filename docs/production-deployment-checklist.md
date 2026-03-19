@@ -67,10 +67,14 @@ This document lists what is still pending before production release on Android (
 
 ## 6) App quality and platform readiness
 
-- [ ] Add crash reporting/monitoring (Firebase Crashlytics + logs/alerts).
-- [ ] Add analytics for conversion funnel (upgrade click -> purchase -> activated).
-- [ ] Add robust network error handling + retry messaging around purchase verification.
-- [ ] Complete iOS voice output implementation (`Voice.ios.kt` still TODO).
+- [~] Add crash reporting/monitoring (Firebase Crashlytics + logs/alerts).
+  - App hooks added (Crashlytics logging + telemetry), and Cloud Logging metrics created.
+  - Pending: configure notification channels + alert policies in Monitoring/Firebase.
+- [~] Add analytics for conversion funnel (upgrade click -> purchase -> activated).
+  - Conversion events are instrumented in app telemetry.
+  - Pending: configure dashboard and conversion reporting in Firebase Analytics.
+- [x] Add robust network error handling + retry messaging around purchase verification.
+- [x] Complete iOS voice output implementation.
 
 ## 7) Store compliance and legal
 
@@ -81,7 +85,9 @@ This document lists what is still pending before production release on Android (
 
 ## 8) Release pipeline and verification
 
-- [ ] Ensure reproducible release builds for Android and iOS.
+- [~] Ensure reproducible release builds for Android and iOS.
+  - Android `bundleRelease` and iOS arm64 compile are passing locally.
+  - Pending: verify same in CI and archive artifacts with checksums.
 - [ ] Verify signing credentials and key backup process.
 - [ ] Smoke-test matrix before release:
   - Free tier limit and reset behavior
