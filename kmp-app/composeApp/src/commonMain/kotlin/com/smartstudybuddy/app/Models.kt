@@ -51,6 +51,24 @@ data class StudentProfile(
 )
 
 @Serializable
+data class BillingEntitlementStatus(
+    val store: String = "",
+    val productId: String = "",
+    val status: String = "",
+    val lastVerifiedAt: String = "",
+    val lastError: String = "",
+    val packageName: String = "",
+)
+
+@Serializable
+data class BillingStatus(
+    val email: String = "",
+    val tier: String = "free",
+    val linkedDeviceIds: List<String> = emptyList(),
+    val googleEntitlement: BillingEntitlementStatus? = null,
+)
+
+@Serializable
 data class TutorResponse(
     val answer: String,
     val chapter: String,

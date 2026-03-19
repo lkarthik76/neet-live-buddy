@@ -103,12 +103,22 @@ fun NeetLiveBuddyApp() {
         }
 
         LaunchedEffect(state.showSignIn, state.authToken) {
-            if (state.showSignIn && state.isAuthenticated && !state.profileLoaded) {
-                try {
-                    val profile = api.getProfile(baseUrl, state.authToken)
-                    state.updateProfile(profile)
-                } catch (_: Exception) {
-                    // Keep profile fields empty if fetch fails.
+            if (state.showSignIn && state.isAuthenticated) {
+                if (!state.profileLoaded) {
+                    try {
+                        val profile = api.getProfile(baseUrl, state.authToken)
+                        state.updateProfile(profile)
+                    } catch (_: Exception) {
+                        // Keep profile fields empty if fetch fails.
+                    }
+                }
+                if (!state.billingStatusLoaded) {
+                    try {
+                        val status = api.getBillingStatus(baseUrl, state.authToken)
+                        state.updateBillingStatus(status)
+                    } catch (_: Exception) {
+                        // Keep billing status empty if fetch fails.
+                    }
                 }
             }
         }
@@ -249,6 +259,17 @@ fun NeetLiveBuddyApp() {
                         onSignOut = {
                             state.clearAuth()
                             scope.launch { snackbarHostState.showSnackbar("Signed out") }
+                        },
+                        onRefreshBillingStatus = {
+                            scope.launch {
+                                try {
+                                    val status = api.getBillingStatus(baseUrl, state.authToken)
+                                    state.updateBillingStatus(status)
+                                    snackbarHostState.showSnackbar("Billing status refreshed")
+                                } catch (e: Exception) {
+                                    snackbarHostState.showSnackbar(e.message ?: "Failed to load billing status")
+                                }
+                            }
                         },
                         onSaveProfile = { name, phone, classLevel ->
                             scope.launch {
@@ -1105,6 +1126,7 @@ private fun AccountCard(
     onSignUp: (String, String) -> Unit,
     onSignIn: (String, String) -> Unit,
     onSignOut: () -> Unit,
+    onRefreshBillingStatus: () -> Unit,
     onSaveProfile: (String, String, String) -> Unit,
     onLink: () -> Unit,
     onRestore: () -> Unit,
@@ -1274,6 +1296,71 @@ private fun AccountCard(
                         isPhoneValid,
                 ) {
                     Text("Save Profile", style = MaterialTheme.typography.labelMedium)
+                }
+
+                Card(
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                    ),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Column(
+                        modifier = Modifier.padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Text(
+                            "Billing Status",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        val billing = state.billingStatus
+                        Text(
+                            "Tier: ${(billing?.tier ?: state.tier).replaceFirstChar { it.uppercase() }}",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                        Text(
+                            "Linked devices: ${billing?.linkedDeviceIds?.size ?: 0}",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                        val googleEntitlement = billing?.googleEntitlement
+                        if (googleEntitlement != null) {
+                            Text(
+                                "Google product: ${googleEntitlement.productId.ifBlank { "-" }}",
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                            Text(
+                                "Google status: ${googleEntitlement.status.ifBlank { "-" }}",
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                            Text(
+                                "Last verified: ${googleEntitlement.lastVerifiedAt.ifBlank { "-" }}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            if (googleEntitlement.lastError.isNotBlank()) {
+                                Text(
+                                    "Last error: ${googleEntitlement.lastError}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.error,
+                                )
+                            }
+                        } else {
+                            Text(
+                                "No active store entitlement record yet.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+
+                        OutlinedButton(
+                            onClick = onRefreshBillingStatus,
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text("Refresh Billing Status", style = MaterialTheme.typography.labelMedium)
+                        }
+                    }
                 }
 
                 OutlinedButton(

@@ -26,6 +26,8 @@ object AppState {
     var phoneNumber by mutableStateOf("")
     var classLevel by mutableStateOf("")
     var profileLoaded by mutableStateOf(false)
+    var billingStatus by mutableStateOf<BillingStatus?>(null)
+    var billingStatusLoaded by mutableStateOf(false)
     var showUpgradePrompt by mutableStateOf(false)
     var showSignIn by mutableStateOf(false)
 
@@ -59,6 +61,8 @@ object AppState {
         phoneNumber = ""
         classLevel = ""
         profileLoaded = false
+        billingStatus = null
+        billingStatusLoaded = false
     }
 
     fun clearAuth() {
@@ -69,6 +73,8 @@ object AppState {
         phoneNumber = ""
         classLevel = ""
         profileLoaded = false
+        billingStatus = null
+        billingStatusLoaded = false
     }
 
     fun updateProfile(profile: StudentProfile) {
@@ -76,5 +82,10 @@ object AppState {
         phoneNumber = profile.phoneNumber
         classLevel = profile.classLevel
         profileLoaded = true
+    }
+
+    fun updateBillingStatus(status: BillingStatus) {
+        billingStatus = status
+        billingStatusLoaded = true
     }
 }

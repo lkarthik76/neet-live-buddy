@@ -153,4 +153,10 @@ class TutorApi {
             header(HttpHeaders.Authorization, "Bearer $authToken")
         }.body()
     }
+
+    suspend fun getBillingStatus(baseUrl: String, authToken: String): BillingStatus {
+        return client.get("${baseUrl.trimEnd('/')}/billing/status") {
+            header(HttpHeaders.Authorization, "Bearer $authToken")
+        }.body()
+    }
 }

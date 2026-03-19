@@ -74,6 +74,22 @@ type googleEntitlementDoc struct {
 	CreatedAt      string `firestore:"createdAt"`
 }
 
+type BillingEntitlementStatus struct {
+	Store          string `json:"store"`
+	ProductID      string `json:"productId"`
+	Status         string `json:"status"`
+	LastVerifiedAt string `json:"lastVerifiedAt"`
+	LastError      string `json:"lastError,omitempty"`
+	PackageName    string `json:"packageName,omitempty"`
+}
+
+type BillingStatus struct {
+	Email             string                    `json:"email"`
+	Tier              Tier                      `json:"tier"`
+	LinkedDeviceIds   []string                  `json:"linkedDeviceIds"`
+	GoogleEntitlement *BillingEntitlementStatus `json:"googleEntitlement,omitempty"`
+}
+
 type UsageTracker struct {
 	fs *firestore.Client
 }
@@ -448,6 +464,65 @@ func (u *UsageTracker) ListGoogleEntitlementsByStatus(status string) ([]googleEn
 		items = append(items, doc)
 	}
 	return items, nil
+}
+
+func (u *UsageTracker) GetLatestGoogleEntitlementByEmail(email string) (googleEntitlementDoc, bool) {
+	ctx := context.Background()
+	iter := u.fs.Collection("entitlements_google").
+		Where("email", "==", email).
+		Documents(ctx)
+	defer iter.Stop()
+
+	var latest googleEntitlementDoc
+	found := false
+	for {
+		snap, err := iter.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			return googleEntitlementDoc{}, false
+		}
+		var doc googleEntitlementDoc
+		if err := snap.DataTo(&doc); err != nil {
+			continue
+		}
+		if !found || doc.LastVerifiedAt > latest.LastVerifiedAt {
+			latest = doc
+			found = true
+		}
+	}
+	return latest, found
+}
+
+func (u *UsageTracker) GetBillingStatusByEmail(email string) (BillingStatus, bool) {
+	ctx := context.Background()
+	snap, err := u.accountRef(email).Get(ctx)
+	if err != nil {
+		return BillingStatus{}, false
+	}
+	var acct accountDoc
+	if err := snap.DataTo(&acct); err != nil {
+		return BillingStatus{}, false
+	}
+
+	status := BillingStatus{
+		Email:           email,
+		Tier:            Tier(acct.Tier),
+		LinkedDeviceIds: acct.DeviceIds,
+	}
+
+	if ent, ok := u.GetLatestGoogleEntitlementByEmail(email); ok {
+		status.GoogleEntitlement = &BillingEntitlementStatus{
+			Store:          "google_play",
+			ProductID:      ent.ProductID,
+			Status:         ent.Status,
+			LastVerifiedAt: ent.LastVerifiedAt,
+			LastError:      ent.LastError,
+			PackageName:    ent.PackageName,
+		}
+	}
+	return status, true
 }
 
 func (u *UsageTracker) GetProfileByEmail(email string) (StudentProfile, bool) {

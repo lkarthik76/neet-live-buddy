@@ -1291,6 +1291,30 @@ func getProfileHandler(tracker *UsageTracker) http.HandlerFunc {
 	}
 }
 
+func getBillingStatusHandler(tracker *UsageTracker) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		identity, ok := authenticatedIdentityFromRequest(w, r)
+		if !ok {
+			return
+		}
+		if err := tracker.BindOrValidateAccountOwner(identity.Email, identity.FirebaseUID); err != nil {
+			http.Error(w, "account ownership validation failed", http.StatusForbidden)
+			return
+		}
+
+		status, found := tracker.GetBillingStatusByEmail(identity.Email)
+		if !found {
+			status = BillingStatus{
+				Email:           identity.Email,
+				Tier:            TierFree,
+				LinkedDeviceIds: []string{},
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(status)
+	}
+}
+
 func saveProfileHandler(tracker *UsageTracker) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		identity, ok := authenticatedIdentityFromRequest(w, r)
@@ -1507,6 +1531,7 @@ func main() {
 	mux.HandleFunc("POST /auth/restore", restoreHandler(tracker))
 	mux.HandleFunc("GET /profile", getProfileHandler(tracker))
 	mux.HandleFunc("POST /profile", saveProfileHandler(tracker))
+	mux.HandleFunc("GET /billing/status", getBillingStatusHandler(tracker))
 	mux.HandleFunc("POST /tier", tierHandler(tracker))
 	mux.HandleFunc("POST /billing/google/verify", googleBillingVerifyHandler(tracker))
 	mux.HandleFunc("POST /billing/apple/verify", appleBillingVerifyHandler(tracker))
