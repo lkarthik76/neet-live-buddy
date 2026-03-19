@@ -43,6 +43,14 @@ data class UsageInfo(
 )
 
 @Serializable
+data class StudentProfile(
+    val studentName: String = "",
+    val email: String = "",
+    val phoneNumber: String = "",
+    val classLevel: String = "",
+)
+
+@Serializable
 data class TutorResponse(
     val answer: String,
     val chapter: String,

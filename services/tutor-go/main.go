@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -76,21 +77,21 @@ type TermsFile struct {
 }
 
 type ContentStore struct {
-	SystemPrompt   string
-	LanguagePolicy string
+	SystemPrompt    string
+	LanguagePolicy  string
 	ConfusionPolicy string
-	Chapters       ChaptersFile
-	Terms          TermsFile
+	Chapters        ChaptersFile
+	Terms           TermsFile
 }
 
 type GeminiClient struct {
-	apiKey      string
-	model       string
-	httpClient  *http.Client
-	content     *ContentStore
-	retriever   *Retriever
-	ragEnabled  bool
-	ragTopK     int
+	apiKey     string
+	model      string
+	httpClient *http.Client
+	content    *ContentStore
+	retriever  *Retriever
+	ragEnabled bool
+	ragTopK    int
 }
 
 func normalizeLanguage(input string) string {
@@ -759,18 +760,109 @@ type appleVerifyRequest struct {
 	ReceiptData string `json:"receiptData"`
 }
 
+type saveProfileRequest struct {
+	StudentName string `json:"studentName"`
+	Email       string `json:"email"`
+	PhoneNumber string `json:"phoneNumber"`
+	ClassLevel  string `json:"classLevel"`
+}
+
+type authIdentity struct {
+	Email         string
+	FirebaseUID   string
+	EmailVerified bool
+}
+
+func verifyFirebaseIDToken(ctx context.Context, idToken string) (authIdentity, error) {
+	apiKey := strings.TrimSpace(os.Getenv("FIREBASE_WEB_API_KEY"))
+	if apiKey == "" {
+		return authIdentity{}, errors.New("FIREBASE_WEB_API_KEY is not configured")
+	}
+	if strings.TrimSpace(idToken) == "" {
+		return authIdentity{}, errors.New("missing Firebase ID token")
+	}
+
+	reqBody := map[string]any{"idToken": idToken}
+	raw, _ := json.Marshal(reqBody)
+	url := "https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=" + apiKey
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(raw))
+	if err != nil {
+		return authIdentity{}, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	client := &http.Client{Timeout: 20 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return authIdentity{}, err
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode >= 400 {
+		return authIdentity{}, fmt.Errorf("firebase token verify failed: %s", string(body))
+	}
+
+	var parsed struct {
+		Users []struct {
+			Email         string `json:"email"`
+			LocalID       string `json:"localId"`
+			EmailVerified bool   `json:"emailVerified"`
+		} `json:"users"`
+	}
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return authIdentity{}, err
+	}
+	if len(parsed.Users) == 0 || strings.TrimSpace(parsed.Users[0].Email) == "" {
+		return authIdentity{}, errors.New("firebase token has no email")
+	}
+	if !parsed.Users[0].EmailVerified {
+		return authIdentity{}, errors.New("firebase email is not verified")
+	}
+	return authIdentity{
+		Email:         strings.TrimSpace(parsed.Users[0].Email),
+		FirebaseUID:   strings.TrimSpace(parsed.Users[0].LocalID),
+		EmailVerified: parsed.Users[0].EmailVerified,
+	}, nil
+}
+
+func authenticatedIdentityFromRequest(w http.ResponseWriter, r *http.Request) (authIdentity, bool) {
+	authz := strings.TrimSpace(r.Header.Get("Authorization"))
+	if !strings.HasPrefix(authz, "Bearer ") {
+		http.Error(w, "Authorization Bearer token is required", http.StatusUnauthorized)
+		return authIdentity{}, false
+	}
+	idToken := strings.TrimSpace(strings.TrimPrefix(authz, "Bearer "))
+	identity, err := verifyFirebaseIDToken(r.Context(), idToken)
+	if err != nil {
+		http.Error(w, "Invalid auth token: "+err.Error(), http.StatusUnauthorized)
+		return authIdentity{}, false
+	}
+	return identity, true
+}
+
 func linkEmailHandler(tracker *UsageTracker) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		identity, ok := authenticatedIdentityFromRequest(w, r)
+		if !ok {
+			return
+		}
 		var req linkRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, "invalid request body", http.StatusBadRequest)
 			return
 		}
-		if strings.TrimSpace(req.DeviceId) == "" || strings.TrimSpace(req.Email) == "" {
-			http.Error(w, "deviceId and email are required", http.StatusBadRequest)
+		if strings.TrimSpace(req.DeviceId) == "" {
+			http.Error(w, "deviceId is required", http.StatusBadRequest)
 			return
 		}
-		usage := tracker.LinkEmail(req.DeviceId, req.Email)
+		if strings.TrimSpace(req.Email) != "" && !strings.EqualFold(strings.TrimSpace(req.Email), identity.Email) {
+			http.Error(w, "request email must match authenticated account", http.StatusForbidden)
+			return
+		}
+		if err := tracker.BindOrValidateAccountOwner(identity.Email, identity.FirebaseUID); err != nil {
+			http.Error(w, "account ownership validation failed", http.StatusForbidden)
+			return
+		}
+		usage := tracker.LinkEmail(req.DeviceId, identity.Email)
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(usage)
 	}
@@ -778,16 +870,28 @@ func linkEmailHandler(tracker *UsageTracker) http.HandlerFunc {
 
 func restoreHandler(tracker *UsageTracker) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		identity, ok := authenticatedIdentityFromRequest(w, r)
+		if !ok {
+			return
+		}
 		var req linkRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, "invalid request body", http.StatusBadRequest)
 			return
 		}
-		if strings.TrimSpace(req.DeviceId) == "" || strings.TrimSpace(req.Email) == "" {
-			http.Error(w, "deviceId and email are required", http.StatusBadRequest)
+		if strings.TrimSpace(req.DeviceId) == "" {
+			http.Error(w, "deviceId is required", http.StatusBadRequest)
 			return
 		}
-		usage, found := tracker.RestoreByEmail(req.DeviceId, req.Email)
+		if strings.TrimSpace(req.Email) != "" && !strings.EqualFold(strings.TrimSpace(req.Email), identity.Email) {
+			http.Error(w, "request email must match authenticated account", http.StatusForbidden)
+			return
+		}
+		if err := tracker.BindOrValidateAccountOwner(identity.Email, identity.FirebaseUID); err != nil {
+			http.Error(w, "account ownership validation failed", http.StatusForbidden)
+			return
+		}
+		usage, found := tracker.RestoreByEmail(req.DeviceId, identity.Email)
 		if !found {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusNotFound)
@@ -804,6 +908,14 @@ func restoreHandler(tracker *UsageTracker) http.HandlerFunc {
 
 func tierHandler(tracker *UsageTracker) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if !strings.EqualFold(strings.TrimSpace(os.Getenv("ALLOW_TIER_ENDPOINT")), "true") {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		identity, ok := authenticatedIdentityFromRequest(w, r)
+		if !ok {
+			return
+		}
 		var req tierRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, "invalid request body", http.StatusBadRequest)
@@ -831,12 +943,16 @@ func tierHandler(tracker *UsageTracker) http.HandlerFunc {
 			return
 		}
 
-		if email != "" {
-			tracker.LinkEmail(deviceId, email)
-			tracker.SetTierByEmail(email, tier)
-		} else {
-			tracker.SetTier(deviceId, tier)
+		if email != "" && !strings.EqualFold(email, identity.Email) {
+			http.Error(w, "request email must match authenticated account", http.StatusForbidden)
+			return
 		}
+		if err := tracker.BindOrValidateAccountOwner(identity.Email, identity.FirebaseUID); err != nil {
+			http.Error(w, "account ownership validation failed", http.StatusForbidden)
+			return
+		}
+		tracker.LinkEmail(deviceId, identity.Email)
+		tracker.SetTierByEmail(identity.Email, tier)
 
 		usage := tracker.GetUsage(deviceId)
 		w.Header().Set("Content-Type", "application/json")
@@ -908,6 +1024,10 @@ func verifyGoogleSubscription(ctx context.Context, packageName, purchaseToken, e
 
 func googleBillingVerifyHandler(tracker *UsageTracker) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		identity, ok := authenticatedIdentityFromRequest(w, r)
+		if !ok {
+			return
+		}
 		var req googleVerifyRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, "invalid request body", http.StatusBadRequest)
@@ -916,8 +1036,16 @@ func googleBillingVerifyHandler(tracker *UsageTracker) http.HandlerFunc {
 
 		deviceID := strings.TrimSpace(req.DeviceId)
 		email := strings.TrimSpace(req.Email)
-		if deviceID == "" || email == "" {
-			http.Error(w, "deviceId and email are required", http.StatusBadRequest)
+		if deviceID == "" {
+			http.Error(w, "deviceId is required", http.StatusBadRequest)
+			return
+		}
+		if email != "" && !strings.EqualFold(email, identity.Email) {
+			http.Error(w, "request email must match authenticated account", http.StatusForbidden)
+			return
+		}
+		if err := tracker.BindOrValidateAccountOwner(identity.Email, identity.FirebaseUID); err != nil {
+			http.Error(w, "account ownership validation failed", http.StatusForbidden)
 			return
 		}
 
@@ -942,6 +1070,14 @@ func googleBillingVerifyHandler(tracker *UsageTracker) http.HandlerFunc {
 			strings.TrimSpace(req.ProductId),
 		)
 		if verifyErr != nil {
+			tracker.SaveGoogleEntitlement(
+				identity.Email,
+				strings.TrimSpace(req.ProductId),
+				strings.TrimSpace(req.PurchaseToken),
+				packageName,
+				"inactive",
+				verifyErr.Error(),
+			)
 			log.Printf("google purchase verify failed: %v", verifyErr)
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusPaymentRequired)
@@ -952,8 +1088,16 @@ func googleBillingVerifyHandler(tracker *UsageTracker) http.HandlerFunc {
 			return
 		}
 
-		tracker.LinkEmail(deviceID, email)
-		tracker.SetTierByEmail(email, tier)
+		tracker.LinkEmail(deviceID, identity.Email)
+		tracker.SetTierByEmail(identity.Email, tier)
+		tracker.SaveGoogleEntitlement(
+			identity.Email,
+			strings.TrimSpace(req.ProductId),
+			strings.TrimSpace(req.PurchaseToken),
+			packageName,
+			"active",
+			"",
+		)
 		usage := tracker.GetUsage(deviceID)
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(usage)
@@ -970,9 +1114,9 @@ func verifyAppleReceipt(receiptData, expectedProductID string) error {
 	}
 
 	payload := map[string]any{
-		"receipt-data":               receiptData,
-		"password":                   sharedSecret,
-		"exclude-old-transactions":   true,
+		"receipt-data":             receiptData,
+		"password":                 sharedSecret,
+		"exclude-old-transactions": true,
 	}
 
 	callVerify := func(url string) (map[string]any, error) {
@@ -1080,6 +1224,10 @@ func verifyAppleReceipt(receiptData, expectedProductID string) error {
 
 func appleBillingVerifyHandler(tracker *UsageTracker) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		identity, ok := authenticatedIdentityFromRequest(w, r)
+		if !ok {
+			return
+		}
 		var req appleVerifyRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, "invalid request body", http.StatusBadRequest)
@@ -1087,8 +1235,16 @@ func appleBillingVerifyHandler(tracker *UsageTracker) http.HandlerFunc {
 		}
 		deviceID := strings.TrimSpace(req.DeviceId)
 		email := strings.TrimSpace(req.Email)
-		if deviceID == "" || email == "" {
-			http.Error(w, "deviceId and email are required", http.StatusBadRequest)
+		if deviceID == "" {
+			http.Error(w, "deviceId is required", http.StatusBadRequest)
+			return
+		}
+		if email != "" && !strings.EqualFold(email, identity.Email) {
+			http.Error(w, "request email must match authenticated account", http.StatusForbidden)
+			return
+		}
+		if err := tracker.BindOrValidateAccountOwner(identity.Email, identity.FirebaseUID); err != nil {
+			http.Error(w, "account ownership validation failed", http.StatusForbidden)
 			return
 		}
 		tier, ok := tierFromProductID(req.ProductId)
@@ -1108,11 +1264,229 @@ func appleBillingVerifyHandler(tracker *UsageTracker) http.HandlerFunc {
 			return
 		}
 
-		tracker.LinkEmail(deviceID, email)
-		tracker.SetTierByEmail(email, tier)
+		tracker.LinkEmail(deviceID, identity.Email)
+		tracker.SetTierByEmail(identity.Email, tier)
 		usage := tracker.GetUsage(deviceID)
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(usage)
+	}
+}
+
+func getProfileHandler(tracker *UsageTracker) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		identity, ok := authenticatedIdentityFromRequest(w, r)
+		if !ok {
+			return
+		}
+		if err := tracker.BindOrValidateAccountOwner(identity.Email, identity.FirebaseUID); err != nil {
+			http.Error(w, "account ownership validation failed", http.StatusForbidden)
+			return
+		}
+		profile, found := tracker.GetProfileByEmail(identity.Email)
+		if !found {
+			profile = StudentProfile{Email: identity.Email}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(profile)
+	}
+}
+
+func saveProfileHandler(tracker *UsageTracker) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		identity, ok := authenticatedIdentityFromRequest(w, r)
+		if !ok {
+			return
+		}
+
+		var req saveProfileRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid request body", http.StatusBadRequest)
+			return
+		}
+		if strings.TrimSpace(req.Email) != "" && !strings.EqualFold(strings.TrimSpace(req.Email), identity.Email) {
+			http.Error(w, "request email must match authenticated account", http.StatusForbidden)
+			return
+		}
+		if err := tracker.BindOrValidateAccountOwner(identity.Email, identity.FirebaseUID); err != nil {
+			http.Error(w, "account ownership validation failed", http.StatusForbidden)
+			return
+		}
+
+		saved, err := tracker.SaveProfileByEmail(identity.Email, StudentProfile{
+			StudentName: strings.TrimSpace(req.StudentName),
+			Email:       identity.Email,
+			PhoneNumber: strings.TrimSpace(req.PhoneNumber),
+			ClassLevel:  strings.TrimSpace(req.ClassLevel),
+		})
+		if err != nil {
+			http.Error(w, "could not save profile", http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(saved)
+	}
+}
+
+func requireBearerFromEnv(w http.ResponseWriter, r *http.Request, envKey string) bool {
+	expected := strings.TrimSpace(os.Getenv(envKey))
+	if expected == "" {
+		http.Error(w, envKey+" is not configured", http.StatusServiceUnavailable)
+		return false
+	}
+	authz := strings.TrimSpace(r.Header.Get("Authorization"))
+	if authz != "Bearer "+expected {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return false
+	}
+	return true
+}
+
+func googleRTDNHandler(tracker *UsageTracker) http.HandlerFunc {
+	type pushEnvelope struct {
+		Message struct {
+			Data string `json:"data"`
+		} `json:"message"`
+	}
+	type rtdnMessage struct {
+		PackageName              string `json:"packageName"`
+		SubscriptionNotification struct {
+			NotificationType int    `json:"notificationType"`
+			PurchaseToken    string `json:"purchaseToken"`
+			SubscriptionID   string `json:"subscriptionId"`
+		} `json:"subscriptionNotification"`
+	}
+
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !requireBearerFromEnv(w, r, "GOOGLE_RTDN_BEARER_TOKEN") {
+			return
+		}
+		var env pushEnvelope
+		if err := json.NewDecoder(r.Body).Decode(&env); err != nil {
+			http.Error(w, "invalid request body", http.StatusBadRequest)
+			return
+		}
+		if strings.TrimSpace(env.Message.Data) == "" {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"status":"ignored","reason":"empty_message"}`))
+			return
+		}
+		raw, err := base64.StdEncoding.DecodeString(env.Message.Data)
+		if err != nil {
+			http.Error(w, "invalid pubsub message data", http.StatusBadRequest)
+			return
+		}
+		var msg rtdnMessage
+		if err := json.Unmarshal(raw, &msg); err != nil {
+			http.Error(w, "invalid rtdn payload", http.StatusBadRequest)
+			return
+		}
+
+		purchaseToken := strings.TrimSpace(msg.SubscriptionNotification.PurchaseToken)
+		productID := strings.TrimSpace(msg.SubscriptionNotification.SubscriptionID)
+		if purchaseToken == "" || productID == "" {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"status":"ignored","reason":"missing_subscription_payload"}`))
+			return
+		}
+
+		ent, found := tracker.GetGoogleEntitlementByToken(purchaseToken)
+		packageName := strings.TrimSpace(msg.PackageName)
+		if packageName == "" {
+			packageName = strings.TrimSpace(ent.PackageName)
+		}
+		if packageName == "" {
+			packageName = strings.TrimSpace(os.Getenv("GOOGLE_PLAY_PACKAGE_NAME"))
+		}
+		if packageName == "" {
+			packageName = "com.smartstudybuddy.app"
+		}
+
+		if !found || strings.TrimSpace(ent.Email) == "" {
+			log.Printf("RTDN token not mapped yet: product=%s token=%s", productID, purchaseToken)
+			w.WriteHeader(http.StatusAccepted)
+			_, _ = w.Write([]byte(`{"status":"accepted","reason":"token_not_mapped"}`))
+			return
+		}
+
+		if err := verifyGoogleSubscription(r.Context(), packageName, purchaseToken, productID); err != nil {
+			log.Printf("RTDN subscription inactive: %v", err)
+			tracker.SaveGoogleEntitlement(ent.Email, productID, purchaseToken, packageName, "inactive", err.Error())
+			_ = tracker.SetTierByEmail(ent.Email, TierFree)
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"status":"processed","result":"downgraded"}`))
+			return
+		}
+
+		tier, ok := tierFromProductID(productID)
+		if ok {
+			_ = tracker.SetTierByEmail(ent.Email, tier)
+		}
+		tracker.SaveGoogleEntitlement(ent.Email, productID, purchaseToken, packageName, "active", "")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"status":"processed","result":"active"}`))
+	}
+}
+
+func appleServerNotificationHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !requireBearerFromEnv(w, r, "APPLE_SERVER_NOTIFICATIONS_BEARER_TOKEN") {
+			return
+		}
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			http.Error(w, "invalid request body", http.StatusBadRequest)
+			return
+		}
+		notificationType := strings.TrimSpace(fmt.Sprint(payload["notificationType"]))
+		subtype := strings.TrimSpace(fmt.Sprint(payload["subtype"]))
+		log.Printf("apple notification received: type=%s subtype=%s", notificationType, subtype)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"status":"processed"}`))
+	}
+}
+
+func reconcileGoogleEntitlementsHandler(tracker *UsageTracker) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !requireBearerFromEnv(w, r, "RECONCILE_BEARER_TOKEN") {
+			return
+		}
+		activeDocs, err := tracker.ListGoogleEntitlementsByStatus("active")
+		if err != nil {
+			http.Error(w, "failed to load entitlements", http.StatusInternalServerError)
+			return
+		}
+		type reconcileResult struct {
+			Checked     int `json:"checked"`
+			StillActive int `json:"stillActive"`
+			Downgraded  int `json:"downgraded"`
+		}
+		result := reconcileResult{}
+		for _, doc := range activeDocs {
+			result.Checked++
+			packageName := strings.TrimSpace(doc.PackageName)
+			if packageName == "" {
+				packageName = strings.TrimSpace(os.Getenv("GOOGLE_PLAY_PACKAGE_NAME"))
+			}
+			if packageName == "" {
+				packageName = "com.smartstudybuddy.app"
+			}
+			err := verifyGoogleSubscription(r.Context(), packageName, doc.PurchaseToken, doc.ProductID)
+			if err != nil {
+				tracker.SaveGoogleEntitlement(doc.Email, doc.ProductID, doc.PurchaseToken, packageName, "inactive", err.Error())
+				_ = tracker.SetTierByEmail(doc.Email, TierFree)
+				result.Downgraded++
+				continue
+			}
+			tier, ok := tierFromProductID(doc.ProductID)
+			if ok {
+				_ = tracker.SetTierByEmail(doc.Email, tier)
+			}
+			tracker.SaveGoogleEntitlement(doc.Email, doc.ProductID, doc.PurchaseToken, packageName, "active", "")
+			result.StillActive++
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(result)
 	}
 }
 
@@ -1131,9 +1505,14 @@ func main() {
 	mux.HandleFunc("POST /tutor", tutorHandler(gemini, tracker))
 	mux.HandleFunc("POST /auth/link", linkEmailHandler(tracker))
 	mux.HandleFunc("POST /auth/restore", restoreHandler(tracker))
+	mux.HandleFunc("GET /profile", getProfileHandler(tracker))
+	mux.HandleFunc("POST /profile", saveProfileHandler(tracker))
 	mux.HandleFunc("POST /tier", tierHandler(tracker))
 	mux.HandleFunc("POST /billing/google/verify", googleBillingVerifyHandler(tracker))
 	mux.HandleFunc("POST /billing/apple/verify", appleBillingVerifyHandler(tracker))
+	mux.HandleFunc("POST /billing/google/rtdn", googleRTDNHandler(tracker))
+	mux.HandleFunc("POST /billing/apple/notifications", appleServerNotificationHandler())
+	mux.HandleFunc("POST /billing/reconcile/google", reconcileGoogleEntitlementsHandler(tracker))
 
 	port := os.Getenv("PORT")
 	if port == "" {

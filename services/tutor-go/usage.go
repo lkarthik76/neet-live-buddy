@@ -2,11 +2,15 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
 	"log"
 	"os"
 	"time"
 
 	"cloud.google.com/go/firestore"
+	"google.golang.org/api/iterator"
 )
 
 type Tier string
@@ -31,6 +35,13 @@ type UsageInfo struct {
 	ResetsAt string `json:"resetsAt"`
 }
 
+type StudentProfile struct {
+	StudentName string `json:"studentName"`
+	Email       string `json:"email"`
+	PhoneNumber string `json:"phoneNumber"`
+	ClassLevel  string `json:"classLevel"`
+}
+
 // Firestore document schema for devices/{deviceId}
 type deviceDoc struct {
 	Tier       string `firestore:"tier"`
@@ -42,10 +53,25 @@ type deviceDoc struct {
 
 // Firestore document schema for accounts/{email}
 type accountDoc struct {
-	Email     string   `firestore:"email"`
-	Tier      string   `firestore:"tier"`
-	DeviceIds []string `firestore:"deviceIds"`
-	LinkedAt  string   `firestore:"linkedAt"`
+	Email       string   `firestore:"email"`
+	Tier        string   `firestore:"tier"`
+	DeviceIds   []string `firestore:"deviceIds"`
+	LinkedAt    string   `firestore:"linkedAt"`
+	FirebaseUID string   `firestore:"firebaseUid"`
+	StudentName string   `firestore:"studentName"`
+	PhoneNumber string   `firestore:"phoneNumber"`
+	ClassLevel  string   `firestore:"classLevel"`
+}
+
+type googleEntitlementDoc struct {
+	Email          string `firestore:"email"`
+	ProductID      string `firestore:"productId"`
+	PurchaseToken  string `firestore:"purchaseToken"`
+	PackageName    string `firestore:"packageName"`
+	Status         string `firestore:"status"`
+	LastError      string `firestore:"lastError"`
+	LastVerifiedAt string `firestore:"lastVerifiedAt"`
+	CreatedAt      string `firestore:"createdAt"`
 }
 
 type UsageTracker struct {
@@ -95,6 +121,15 @@ func (u *UsageTracker) deviceRef(deviceId string) *firestore.DocumentRef {
 
 func (u *UsageTracker) accountRef(email string) *firestore.DocumentRef {
 	return u.fs.Collection("accounts").Doc(email)
+}
+
+func googleEntitlementDocID(purchaseToken string) string {
+	sum := sha256.Sum256([]byte(purchaseToken))
+	return hex.EncodeToString(sum[:])
+}
+
+func (u *UsageTracker) googleEntitlementRef(purchaseToken string) *firestore.DocumentRef {
+	return u.fs.Collection("entitlements_google").Doc(googleEntitlementDocID(purchaseToken))
 }
 
 func (u *UsageTracker) getDevice(ctx context.Context, deviceId string) deviceDoc {
@@ -318,6 +353,151 @@ func (u *UsageTracker) SetTierByEmail(email string, tier Tier) bool {
 		}
 	}
 	return true
+}
+
+func (u *UsageTracker) BindOrValidateAccountOwner(email, firebaseUID string) error {
+	ctx := context.Background()
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	snap, err := u.accountRef(email).Get(ctx)
+	if err != nil {
+		acct := accountDoc{
+			Email:       email,
+			Tier:        string(TierFree),
+			DeviceIds:   []string{},
+			LinkedAt:    now,
+			FirebaseUID: firebaseUID,
+		}
+		_, setErr := u.accountRef(email).Set(ctx, acct)
+		return setErr
+	}
+
+	var acct accountDoc
+	if err := snap.DataTo(&acct); err != nil {
+		return err
+	}
+	if acct.FirebaseUID == "" {
+		acct.FirebaseUID = firebaseUID
+		_, setErr := u.accountRef(email).Set(ctx, acct)
+		return setErr
+	}
+	if acct.FirebaseUID != firebaseUID {
+		return errors.New("account ownership mismatch")
+	}
+	return nil
+}
+
+func (u *UsageTracker) SaveGoogleEntitlement(email, productID, purchaseToken, packageName, status, lastErr string) {
+	ctx := context.Background()
+	now := time.Now().UTC().Format(time.RFC3339)
+	ref := u.googleEntitlementRef(purchaseToken)
+	doc := googleEntitlementDoc{
+		Email:          email,
+		ProductID:      productID,
+		PurchaseToken:  purchaseToken,
+		PackageName:    packageName,
+		Status:         status,
+		LastError:      lastErr,
+		LastVerifiedAt: now,
+		CreatedAt:      now,
+	}
+	if snap, err := ref.Get(ctx); err == nil {
+		var existing googleEntitlementDoc
+		if err := snap.DataTo(&existing); err == nil && existing.CreatedAt != "" {
+			doc.CreatedAt = existing.CreatedAt
+		}
+	}
+	if _, err := ref.Set(ctx, doc); err != nil {
+		log.Printf("Firestore write error (SaveGoogleEntitlement): %v", err)
+	}
+}
+
+func (u *UsageTracker) GetGoogleEntitlementByToken(purchaseToken string) (googleEntitlementDoc, bool) {
+	ctx := context.Background()
+	snap, err := u.googleEntitlementRef(purchaseToken).Get(ctx)
+	if err != nil {
+		return googleEntitlementDoc{}, false
+	}
+	var doc googleEntitlementDoc
+	if err := snap.DataTo(&doc); err != nil {
+		return googleEntitlementDoc{}, false
+	}
+	return doc, true
+}
+
+func (u *UsageTracker) ListGoogleEntitlementsByStatus(status string) ([]googleEntitlementDoc, error) {
+	ctx := context.Background()
+	iter := u.fs.Collection("entitlements_google").
+		Where("status", "==", status).
+		Documents(ctx)
+	defer iter.Stop()
+
+	var items []googleEntitlementDoc
+	for {
+		snap, err := iter.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		var doc googleEntitlementDoc
+		if err := snap.DataTo(&doc); err != nil {
+			continue
+		}
+		items = append(items, doc)
+	}
+	return items, nil
+}
+
+func (u *UsageTracker) GetProfileByEmail(email string) (StudentProfile, bool) {
+	ctx := context.Background()
+	snap, err := u.accountRef(email).Get(ctx)
+	if err != nil {
+		return StudentProfile{}, false
+	}
+	var acct accountDoc
+	if err := snap.DataTo(&acct); err != nil {
+		return StudentProfile{}, false
+	}
+	return StudentProfile{
+		StudentName: acct.StudentName,
+		Email:       acct.Email,
+		PhoneNumber: acct.PhoneNumber,
+		ClassLevel:  acct.ClassLevel,
+	}, true
+}
+
+func (u *UsageTracker) SaveProfileByEmail(email string, profile StudentProfile) (StudentProfile, error) {
+	ctx := context.Background()
+	snap, err := u.accountRef(email).Get(ctx)
+	var acct accountDoc
+	if err != nil {
+		acct = accountDoc{
+			Email:     email,
+			Tier:      string(TierFree),
+			DeviceIds: []string{},
+			LinkedAt:  time.Now().UTC().Format(time.RFC3339),
+		}
+	} else if err := snap.DataTo(&acct); err != nil {
+		return StudentProfile{}, err
+	}
+
+	acct.StudentName = profile.StudentName
+	acct.PhoneNumber = profile.PhoneNumber
+	acct.ClassLevel = profile.ClassLevel
+	acct.Email = email
+
+	if _, err := u.accountRef(email).Set(ctx, acct); err != nil {
+		return StudentProfile{}, err
+	}
+
+	return StudentProfile{
+		StudentName: acct.StudentName,
+		Email:       acct.Email,
+		PhoneNumber: acct.PhoneNumber,
+		ClassLevel:  acct.ClassLevel,
+	}, nil
 }
 
 // StripForFreeTier removes premium fields from the response for free-tier users.

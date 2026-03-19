@@ -5,10 +5,12 @@ import io.ktor.client.call.body
 import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.request.get
+import io.ktor.client.request.header
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
+import io.ktor.http.HttpHeaders
 import io.ktor.http.contentType
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.serialization.json.Json
@@ -58,17 +60,19 @@ class TutorApi {
         return client.get("${baseUrl.trimEnd('/')}/usage?deviceId=$deviceId").body()
     }
 
-    suspend fun linkEmail(baseUrl: String, deviceId: String, email: String): UsageInfo {
+    suspend fun linkEmail(baseUrl: String, deviceId: String, email: String, authToken: String): UsageInfo {
         return client.post("${baseUrl.trimEnd('/')}/auth/link") {
             contentType(ContentType.Application.Json)
             setBody(mapOf("deviceId" to deviceId, "email" to email))
+            header(HttpHeaders.Authorization, "Bearer $authToken")
         }.body()
     }
 
-    suspend fun restorePurchase(baseUrl: String, deviceId: String, email: String): UsageInfo {
+    suspend fun restorePurchase(baseUrl: String, deviceId: String, email: String, authToken: String): UsageInfo {
         val response = client.post("${baseUrl.trimEnd('/')}/auth/restore") {
             contentType(ContentType.Application.Json)
             setBody(mapOf("deviceId" to deviceId, "email" to email))
+            header(HttpHeaders.Authorization, "Bearer $authToken")
         }
         if (response.status.value == 404) {
             throw Exception("No account found with this email.")
@@ -76,7 +80,7 @@ class TutorApi {
         return response.body()
     }
 
-    suspend fun setTier(baseUrl: String, deviceId: String, email: String, tier: String): UsageInfo {
+    suspend fun setTier(baseUrl: String, deviceId: String, email: String, tier: String, authToken: String): UsageInfo {
         return client.post("${baseUrl.trimEnd('/')}/tier") {
             contentType(ContentType.Application.Json)
             setBody(
@@ -86,6 +90,7 @@ class TutorApi {
                     "tier" to tier,
                 ),
             )
+            header(HttpHeaders.Authorization, "Bearer $authToken")
         }.body()
     }
 
@@ -96,6 +101,7 @@ class TutorApi {
         productId: String,
         purchaseToken: String,
         packageName: String,
+        authToken: String,
     ): UsageInfo {
         return client.post("${baseUrl.trimEnd('/')}/billing/google/verify") {
             contentType(ContentType.Application.Json)
@@ -108,6 +114,7 @@ class TutorApi {
                     "packageName" to packageName,
                 ),
             )
+            header(HttpHeaders.Authorization, "Bearer $authToken")
         }.body()
     }
 
@@ -117,6 +124,7 @@ class TutorApi {
         email: String,
         productId: String,
         receiptData: String,
+        authToken: String,
     ): UsageInfo {
         return client.post("${baseUrl.trimEnd('/')}/billing/apple/verify") {
             contentType(ContentType.Application.Json)
@@ -128,6 +136,21 @@ class TutorApi {
                     "receiptData" to receiptData,
                 ),
             )
+            header(HttpHeaders.Authorization, "Bearer $authToken")
+        }.body()
+    }
+
+    suspend fun getProfile(baseUrl: String, authToken: String): StudentProfile {
+        return client.get("${baseUrl.trimEnd('/')}/profile") {
+            header(HttpHeaders.Authorization, "Bearer $authToken")
+        }.body()
+    }
+
+    suspend fun saveProfile(baseUrl: String, profile: StudentProfile, authToken: String): StudentProfile {
+        return client.post("${baseUrl.trimEnd('/')}/profile") {
+            contentType(ContentType.Application.Json)
+            setBody(profile)
+            header(HttpHeaders.Authorization, "Bearer $authToken")
         }.body()
     }
 }

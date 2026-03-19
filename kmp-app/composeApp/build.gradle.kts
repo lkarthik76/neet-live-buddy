@@ -49,6 +49,9 @@ kotlin {
             implementation("androidx.core:core-splashscreen:1.0.1")
             implementation("io.ktor:ktor-client-okhttp:2.3.12")
             implementation("com.android.billingclient:billing-ktx:7.1.1")
+            implementation(platform("com.google.firebase:firebase-bom:33.10.0"))
+            implementation("com.google.firebase:firebase-analytics-ktx")
+            implementation("com.google.firebase:firebase-crashlytics-ktx")
             implementation("androidx.camera:camera-core:1.4.1")
             implementation("androidx.camera:camera-camera2:1.4.1")
             implementation("androidx.camera:camera-lifecycle:1.4.1")
@@ -73,6 +76,7 @@ android {
         versionName = "1.0.0"
 
         buildConfigField("String", "BACKEND_URL", "\"https://smart-study-buddy-go-tutor-567474220033.asia-south1.run.app\"")
+        buildConfigField("String", "FIREBASE_WEB_API_KEY", "\"\"")
     }
 
     signingConfigs {

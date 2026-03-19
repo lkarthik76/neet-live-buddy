@@ -20,7 +20,11 @@ gcloud services enable \
   cloudbuild.googleapis.com \
   firestore.googleapis.com \
   artifactregistry.googleapis.com \
-  logging.googleapis.com
+  logging.googleapis.com \
+  secretmanager.googleapis.com \
+  androidpublisher.googleapis.com \
+  pubsub.googleapis.com \
+  cloudscheduler.googleapis.com
 
 echo ""
 echo "GCP services enabled."

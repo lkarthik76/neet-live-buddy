@@ -38,6 +38,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
@@ -45,7 +46,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
@@ -73,8 +76,10 @@ import kotlinx.coroutines.launch
 fun NeetLiveBuddyApp() {
     NeetBuddyTheme {
         val api = remember { TutorApi() }
+        val authApi = remember { AuthApi() }
         val billingClient = remember { createBillingClient() }
         val voicePlayer = rememberVoicePlayer()
+        val telemetry = rememberTelemetry()
         val scope = rememberCoroutineScope()
         val state = AppState
         val snackbarHostState = remember { SnackbarHostState() }
@@ -94,6 +99,17 @@ fun NeetLiveBuddyApp() {
             if (state.error.isNotBlank()) {
                 snackbarHostState.showSnackbar(state.error)
                 state.error = ""
+            }
+        }
+
+        LaunchedEffect(state.showSignIn, state.authToken) {
+            if (state.showSignIn && state.isAuthenticated && !state.profileLoaded) {
+                try {
+                    val profile = api.getProfile(baseUrl, state.authToken)
+                    state.updateProfile(profile)
+                } catch (_: Exception) {
+                    // Keep profile fields empty if fetch fails.
+                }
             }
         }
 
@@ -152,7 +168,13 @@ fun NeetLiveBuddyApp() {
                 if (state.isFreeTier) {
                     FreeTierBanner(
                         questionsLeft = state.questionsRemaining,
-                        onUpgradeClick = { state.showUpgradePrompt = true },
+                        onUpgradeClick = {
+                            telemetry.trackEvent(
+                                name = "upgrade_prompt_opened",
+                                params = mapOf("source" to "free_tier_banner"),
+                            )
+                            state.showUpgradePrompt = true
+                        },
                     )
                 }
 
@@ -171,6 +193,7 @@ fun NeetLiveBuddyApp() {
                                         deviceId = deviceId,
                                         email = state.email,
                                         tier = selectedTier,
+                                        authToken = state.authToken,
                                     )
                                     state.updateUsage(usage)
                                     snackbarHostState.showSnackbar(
@@ -201,22 +224,78 @@ fun NeetLiveBuddyApp() {
                 ) {
                     AccountCard(
                         state = state,
-                        onLink = { email ->
+                        onSignUp = { email, password ->
                             scope.launch {
                                 try {
-                                    val usage = api.linkEmail(baseUrl, deviceId, email)
+                                    val auth = authApi.signUp(email = email, password = password)
+                                    state.setAuth(auth)
+                                    snackbarHostState.showSnackbar("Account created: ${auth.email}")
+                                } catch (e: Exception) {
+                                    snackbarHostState.showSnackbar(e.message ?: "Sign up failed")
+                                }
+                            }
+                        },
+                        onSignIn = { email, password ->
+                            scope.launch {
+                                try {
+                                    val auth = authApi.signIn(email = email, password = password)
+                                    state.setAuth(auth)
+                                    snackbarHostState.showSnackbar("Signed in: ${auth.email}")
+                                } catch (e: Exception) {
+                                    snackbarHostState.showSnackbar(e.message ?: "Sign in failed")
+                                }
+                            }
+                        },
+                        onSignOut = {
+                            state.clearAuth()
+                            scope.launch { snackbarHostState.showSnackbar("Signed out") }
+                        },
+                        onSaveProfile = { name, phone, classLevel ->
+                            scope.launch {
+                                try {
+                                    val saved = api.saveProfile(
+                                        baseUrl = baseUrl,
+                                        profile = StudentProfile(
+                                            studentName = name,
+                                            email = state.authEmail,
+                                            phoneNumber = phone,
+                                            classLevel = classLevel,
+                                        ),
+                                        authToken = state.authToken,
+                                    )
+                                    state.updateProfile(saved)
+                                    snackbarHostState.showSnackbar("Profile saved")
+                                } catch (e: Exception) {
+                                    snackbarHostState.showSnackbar(e.message ?: "Failed to save profile")
+                                }
+                            }
+                        },
+                        onLink = {
+                            scope.launch {
+                                try {
+                                    val usage = api.linkEmail(
+                                        baseUrl = baseUrl,
+                                        deviceId = deviceId,
+                                        email = state.authEmail,
+                                        authToken = state.authToken,
+                                    )
                                     state.updateUsage(usage)
                                     state.showSignIn = false
-                                    snackbarHostState.showSnackbar("Account linked: $email")
+                                    snackbarHostState.showSnackbar("Account linked: ${state.authEmail}")
                                 } catch (e: Exception) {
                                     snackbarHostState.showSnackbar(e.message ?: "Failed to link email")
                                 }
                             }
                         },
-                        onRestore = { email ->
+                        onRestore = {
                             scope.launch {
                                 try {
-                                    val usage = api.restorePurchase(baseUrl, deviceId, email)
+                                    val usage = api.restorePurchase(
+                                        baseUrl = baseUrl,
+                                        deviceId = deviceId,
+                                        email = state.authEmail,
+                                        authToken = state.authToken,
+                                    )
                                     state.updateUsage(usage)
                                     state.showSignIn = false
                                     snackbarHostState.showSnackbar("Account restored! Tier: ${usage.tier}")
@@ -263,9 +342,14 @@ fun NeetLiveBuddyApp() {
                                 voicePlayer.speak(response.answer, state.language)
                             } catch (e: DailyLimitReachedException) {
                                 state.updateUsage(e.usage)
+                                telemetry.trackEvent(
+                                    name = "upgrade_prompt_opened",
+                                    params = mapOf("source" to "daily_limit_reached"),
+                                )
                                 state.showUpgradePrompt = true
                                 state.error = e.message ?: "Daily limit reached"
                             } catch (e: Exception) {
+                                telemetry.recordError(e, "ask_tutor_failed")
                                 state.error = e.message ?: "Request failed"
                             } finally {
                                 state.loading = false
@@ -287,42 +371,91 @@ fun NeetLiveBuddyApp() {
                         currentTier = state.tier,
                         onSelectPlan = { tier ->
                             scope.launch {
+                                telemetry.trackEvent(
+                                    name = "plan_selected",
+                                    params = mapOf("tier" to tier.apiValue),
+                                )
                                 val billingResult = billingClient.startSubscription(tier)
                                 when (billingResult) {
                                     is BillingPurchaseResult.Purchased -> {
+                                        telemetry.trackEvent(
+                                            name = "purchase_captured",
+                                            params = mapOf(
+                                                "store" to billingResult.store.name,
+                                                "product_id" to billingResult.productId,
+                                            ),
+                                        )
                                         snackbarHostState.showSnackbar(
                                             "Purchase captured. Verifying with backend...",
                                         )
-                                        try {
-                                            val usage = when (billingResult.store) {
-                                                BillingStore.GooglePlay -> api.verifyGooglePurchase(
-                                                    baseUrl = baseUrl,
-                                                    deviceId = deviceId,
-                                                    email = state.email,
-                                                    productId = billingResult.productId,
-                                                    purchaseToken = billingResult.verificationData,
-                                                    packageName = getAppPackageName(),
-                                                )
+                                        var activated = false
+                                        var verificationAttempt = 0
+                                        while (!activated && verificationAttempt < 3) {
+                                            verificationAttempt++
+                                            try {
+                                                val usage = when (billingResult.store) {
+                                                    BillingStore.GooglePlay -> api.verifyGooglePurchase(
+                                                        baseUrl = baseUrl,
+                                                        deviceId = deviceId,
+                                                        email = state.authEmail,
+                                                        productId = billingResult.productId,
+                                                        purchaseToken = billingResult.verificationData,
+                                                        packageName = getAppPackageName(),
+                                                        authToken = state.authToken,
+                                                    )
 
-                                                BillingStore.AppStore -> api.verifyApplePurchase(
-                                                    baseUrl = baseUrl,
-                                                    deviceId = deviceId,
-                                                    email = state.email,
-                                                    productId = billingResult.productId,
-                                                    receiptData = billingResult.verificationData,
+                                                    BillingStore.AppStore -> api.verifyApplePurchase(
+                                                        baseUrl = baseUrl,
+                                                        deviceId = deviceId,
+                                                        email = state.authEmail,
+                                                        productId = billingResult.productId,
+                                                        receiptData = billingResult.verificationData,
+                                                        authToken = state.authToken,
+                                                    )
+                                                }
+                                                state.updateUsage(usage)
+                                                state.showUpgradePrompt = false
+                                                telemetry.trackEvent(
+                                                    name = "purchase_activated",
+                                                    params = mapOf(
+                                                        "tier" to usage.tier,
+                                                        "store" to billingResult.store.name,
+                                                    ),
                                                 )
+                                                snackbarHostState.showSnackbar(
+                                                    "Plan activated: ${usage.tier.replaceFirstChar { it.uppercase() }}",
+                                                )
+                                                activated = true
+                                            } catch (e: Exception) {
+                                                telemetry.recordError(
+                                                    e,
+                                                    "purchase_verification_failed_attempt_$verificationAttempt",
+                                                )
+                                                telemetry.trackEvent(
+                                                    name = "purchase_verification_failed",
+                                                    params = mapOf(
+                                                        "store" to billingResult.store.name,
+                                                        "attempt" to verificationAttempt.toString(),
+                                                    ),
+                                                )
+                                                val message = e.message ?: "Purchase verification failed"
+                                                val snackbarResult = snackbarHostState.showSnackbar(
+                                                    message = "$message. Retry now?",
+                                                    actionLabel = "Retry",
+                                                    withDismissAction = true,
+                                                )
+                                                if (snackbarResult != SnackbarResult.ActionPerformed) {
+                                                    snackbarHostState.showSnackbar(
+                                                        "You can use Restore Purchase from Account screen later.",
+                                                    )
+                                                    break
+                                                }
                                             }
-                                            state.updateUsage(usage)
-                                            state.showUpgradePrompt = false
-                                            snackbarHostState.showSnackbar(
-                                                "Plan activated: ${usage.tier.replaceFirstChar { it.uppercase() }}",
-                                            )
-                                        } catch (e: Exception) {
-                                            snackbarHostState.showSnackbar(e.message ?: "Purchase verification failed")
                                         }
                                     }
 
                                     BillingPurchaseResult.Cancelled -> {
+                                        telemetry.trackEvent(name = "purchase_cancelled")
                                         snackbarHostState.showSnackbar("Purchase cancelled")
                                     }
 
@@ -332,8 +465,9 @@ fun NeetLiveBuddyApp() {
                                                 val usage = api.setTier(
                                                     baseUrl = baseUrl,
                                                     deviceId = deviceId,
-                                                    email = state.email,
+                                                    email = state.authEmail,
                                                     tier = tier.apiValue,
+                                                    authToken = state.authToken,
                                                 )
                                                 state.updateUsage(usage)
                                                 state.showUpgradePrompt = false
@@ -341,14 +475,27 @@ fun NeetLiveBuddyApp() {
                                                     "Debug mode: ${tier.name} plan set",
                                                 )
                                             } catch (e: Exception) {
+                                                telemetry.recordError(e, "debug_tier_set_failed")
                                                 snackbarHostState.showSnackbar(e.message ?: "Failed to set debug tier")
                                             }
                                         } else {
+                                            telemetry.trackEvent(
+                                                name = "purchase_unsupported",
+                                                params = mapOf("reason" to billingResult.reason),
+                                            )
                                             snackbarHostState.showSnackbar(billingResult.reason)
                                         }
                                     }
 
                                     is BillingPurchaseResult.Error -> {
+                                        telemetry.recordError(
+                                            Exception(billingResult.message),
+                                            "purchase_flow_error",
+                                        )
+                                        telemetry.trackEvent(
+                                            name = "purchase_error",
+                                            params = mapOf("message" to billingResult.message),
+                                        )
                                         snackbarHostState.showSnackbar(billingResult.message)
                                     }
                                 }
@@ -952,14 +1099,34 @@ private fun PricingOption(
 }
 
 @Composable
+@OptIn(ExperimentalMaterial3Api::class)
 private fun AccountCard(
     state: AppState,
-    onLink: (String) -> Unit,
-    onRestore: (String) -> Unit,
+    onSignUp: (String, String) -> Unit,
+    onSignIn: (String, String) -> Unit,
+    onSignOut: () -> Unit,
+    onSaveProfile: (String, String, String) -> Unit,
+    onLink: () -> Unit,
+    onRestore: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-    var emailInput by remember { mutableStateOf(state.email) }
+    var emailInput by remember { mutableStateOf(state.authEmail.ifBlank { state.email }) }
+    var passwordInput by remember { mutableStateOf("") }
+    var studentNameInput by remember { mutableStateOf(state.studentName) }
+    var phoneInput by remember { mutableStateOf(state.phoneNumber) }
+    var classInput by remember { mutableStateOf(state.classLevel) }
+    var classExpanded by remember { mutableStateOf(false) }
     val isAlreadyLinked = state.isSignedIn
+    val classOptions = listOf("11", "12", "repeter")
+    val isPhoneValid = phoneInput.trim().isBlank() || Regex("^[0-9]{10}$").matches(phoneInput.trim())
+
+    LaunchedEffect(state.studentName, state.phoneNumber, state.classLevel, state.profileLoaded) {
+        if (state.profileLoaded) {
+            studentNameInput = state.studentName
+            phoneInput = state.phoneNumber
+            classInput = state.classLevel
+        }
+    }
 
     Card(
         colors = CardDefaults.cardColors(
@@ -974,10 +1141,149 @@ private fun AccountCard(
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Text(
-                if (isAlreadyLinked) "Account" else "Sign In",
+                if (isAlreadyLinked) "Account" else "Sign In / Create Account",
                 style = MaterialTheme.typography.titleLarge,
                 color = MaterialTheme.colorScheme.onSurface,
             )
+
+            Text(
+                if (state.isAuthenticated) "Authenticated as: ${state.authEmail}" else "Authenticate first to secure your account actions",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+
+            OutlinedTextField(
+                value = emailInput,
+                onValueChange = { emailInput = it },
+                label = { Text("Email address") },
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+                singleLine = true,
+            )
+
+            OutlinedTextField(
+                value = passwordInput,
+                onValueChange = { passwordInput = it },
+                label = { Text("Password (min 6 chars)") },
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+                singleLine = true,
+            )
+
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Button(
+                    onClick = { onSignIn(emailInput.trim(), passwordInput) },
+                    enabled = emailInput.trim().contains("@") && passwordInput.length >= 6,
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text("Sign In", style = MaterialTheme.typography.labelMedium)
+                }
+                OutlinedButton(
+                    onClick = { onSignUp(emailInput.trim(), passwordInput) },
+                    enabled = emailInput.trim().contains("@") && passwordInput.length >= 6,
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text("Sign Up", style = MaterialTheme.typography.labelMedium)
+                }
+            }
+
+            if (state.isAuthenticated) {
+                Text(
+                    "Student profile",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+
+                OutlinedTextField(
+                    value = studentNameInput,
+                    onValueChange = { studentNameInput = it },
+                    label = { Text("Student name") },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    singleLine = true,
+                )
+
+                OutlinedTextField(
+                    value = phoneInput,
+                    onValueChange = { phoneInput = it },
+                    label = { Text("Phone number") },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    singleLine = true,
+                )
+                if (!isPhoneValid) {
+                    Text(
+                        "Enter a valid 10-digit phone number",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+
+                Box {
+                    OutlinedTextField(
+                        value = classInput,
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text("Class") },
+                        placeholder = { Text("Select: 11 / 12 / repeter") },
+                        trailingIcon = {
+                            Icon(
+                                imageVector = Icons.Default.ArrowDropDown,
+                                contentDescription = "Select class",
+                            )
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { classExpanded = true },
+                        shape = RoundedCornerShape(12.dp),
+                        singleLine = true,
+                    )
+                    DropdownMenu(
+                        expanded = classExpanded,
+                        onDismissRequest = { classExpanded = false },
+                    ) {
+                        classOptions.forEach { option ->
+                            DropdownMenuItem(
+                                text = { Text(option) },
+                                onClick = {
+                                    classInput = option
+                                    classExpanded = false
+                                },
+                            )
+                        }
+                    }
+                }
+
+                Button(
+                    onClick = {
+                        onSaveProfile(
+                            studentNameInput.trim(),
+                            phoneInput.trim(),
+                            classInput.trim(),
+                        )
+                    },
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = studentNameInput.trim().isNotBlank() &&
+                        classOptions.contains(classInput.trim()) &&
+                        isPhoneValid,
+                ) {
+                    Text("Save Profile", style = MaterialTheme.typography.labelMedium)
+                }
+
+                OutlinedButton(
+                    onClick = onSignOut,
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("Sign Out", style = MaterialTheme.typography.labelMedium)
+                }
+            }
 
             if (isAlreadyLinked) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1015,22 +1321,13 @@ private fun AccountCard(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
 
-                OutlinedTextField(
-                    value = emailInput,
-                    onValueChange = { emailInput = it },
-                    label = { Text("Email address") },
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp),
-                    singleLine = true,
-                )
-
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Button(
-                        onClick = { onLink(emailInput.trim()) },
-                        enabled = emailInput.trim().contains("@"),
+                        onClick = onLink,
+                        enabled = state.isAuthenticated,
                         colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
                         shape = RoundedCornerShape(10.dp),
                         modifier = Modifier.weight(1f),
@@ -1039,8 +1336,8 @@ private fun AccountCard(
                     }
 
                     OutlinedButton(
-                        onClick = { onRestore(emailInput.trim()) },
-                        enabled = emailInput.trim().contains("@"),
+                        onClick = onRestore,
+                        enabled = state.isAuthenticated,
                         shape = RoundedCornerShape(10.dp),
                         modifier = Modifier.weight(1f),
                     ) {
