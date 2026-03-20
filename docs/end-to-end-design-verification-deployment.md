@@ -72,6 +72,7 @@ This document describes the production-ready architecture and operating model fo
   - `devices/{deviceId}`: usage counter, count date, tier, linked email.
   - `accounts/{email}`: tier, linked device IDs, profile fields (`studentName`, `phoneNumber`, `classLevel`), Firebase UID ownership.
   - `entitlements_google/{tokenHash}`: purchase token mapping and latest verification state.
+- **Ops — complimentary / scholarship tier:** `infra/grant-complimentary-tier.sh` (Python, stdlib + `gcloud` token) updates `accounts/{email}.tier` to `pro` or `ultimate` (or `free` to revoke). Uses `--dry-run` first; optional `--reason` writes `complimentaryReason` + `complimentaryGrantedAt` for audit. Requires `GOOGLE_CLOUD_PROJECT` (or `--project`) and Firestore write access.
 - Cloud Run hosts backend service.
 - Secret Manager stores production secrets.
 - Pub/Sub + Cloud Scheduler support RTDN and periodic reconciliation.
