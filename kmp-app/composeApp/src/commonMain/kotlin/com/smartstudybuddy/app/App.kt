@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -73,8 +74,8 @@ import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun NeetLiveBuddyApp() {
-    NeetBuddyTheme {
+fun SmartStudyBuddyApp() {
+    SmartStudyBuddyTheme {
         val api = remember { TutorApi() }
         val authApi = remember { AuthApi() }
         val billingClient = remember { createBillingClient() }
@@ -127,16 +128,39 @@ fun NeetLiveBuddyApp() {
             snackbarHost = { SnackbarHost(snackbarHostState) },
             topBar = {
                 TopAppBar(
+                    // Logo in navigation slot so it aligns to the start like trailing actions align to the end
+                    // (empty navigationIcon makes Material3 add a large title-only inset on the left).
+                    navigationIcon = {
+                        // TopAppBar adds horizontal inset before the nav slot; shift logo left to match trailing edge padding.
+                        Box(
+                            modifier = Modifier
+                                .offset(x = (-20).dp)
+                                .padding(top = 4.dp, bottom = 4.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            AppBarLogo()
+                        }
+                    },
                     title = {
-                        Column {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 4.dp)
+                                // Pull title toward the icon; TopAppBar inserts a large gap between nav slot and title.
+                                .offset(x = (-36).dp),
+                            verticalArrangement = Arrangement.Center,
+                        ) {
                             Text(
-                                "NEET Live Buddy",
-                                style = MaterialTheme.typography.headlineSmall,
+                                "Smart Study",
+                                maxLines = 1,
+                                style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.Bold,
                                 color = Color.White,
                             )
                             Text(
-                                "AI-Powered NEET Exam Tutor",
-                                style = MaterialTheme.typography.labelMedium,
+                                "Your AI study companion",
+                                maxLines = 2,
+                                style = MaterialTheme.typography.bodySmall,
                                 color = Color.White.copy(alpha = 0.92f),
                             )
                         }
@@ -1028,7 +1052,7 @@ private fun UpgradePromptCard(
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Text(
-                "Upgrade to NEET Pro",
+                "Upgrade to Pro",
                 style = MaterialTheme.typography.headlineSmall,
                 color = MaterialTheme.colorScheme.onSecondaryContainer,
                 textAlign = TextAlign.Center,

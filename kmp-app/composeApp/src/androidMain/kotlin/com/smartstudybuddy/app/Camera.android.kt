@@ -26,7 +26,6 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -50,6 +49,7 @@ import java.nio.ByteBuffer
 import androidx.camera.core.resolutionselector.ResolutionSelector
 import androidx.camera.core.resolutionselector.ResolutionStrategy
 import android.util.Size
+import java.util.concurrent.atomic.AtomicBoolean
 
 @OptIn(ExperimentalPermissionsApi::class)
 @Composable
@@ -83,13 +83,8 @@ private fun CameraContent(onImageCaptured: (base64: String) -> Unit) {
     val lifecycleOwner = LocalLifecycleOwner.current
     var imageCapture by remember { mutableStateOf<ImageCapture?>(null) }
     var cameraReady by remember { mutableStateOf(false) }
-    var cameraProvider by remember { mutableStateOf<ProcessCameraProvider?>(null) }
-
-    DisposableEffect(Unit) {
-        onDispose {
-            cameraProvider?.unbindAll()
-        }
-    }
+    /** Set when [AndroidView] is released so async [ProcessCameraProvider] work never touches a disposed surface. */
+    val previewReleased = remember { AtomicBoolean(false) }
 
     Column(modifier = Modifier.fillMaxWidth()) {
         Box(
@@ -100,40 +95,72 @@ private fun CameraContent(onImageCaptured: (base64: String) -> Unit) {
         ) {
             AndroidView(
                 factory = { ctx ->
-                    val previewView = PreviewView(ctx)
+                    previewReleased.set(false)
+                    val previewView = PreviewView(ctx).apply {
+                        // Reduces BufferQueue / "Channel is unrecoverably broken" issues vs SURFACE_VIEW on some OEMs.
+                        implementationMode = PreviewView.ImplementationMode.COMPATIBLE
+                        scaleType = PreviewView.ScaleType.FILL_CENTER
+                    }
+                    val executor = ContextCompat.getMainExecutor(ctx)
                     val cameraProviderFuture = ProcessCameraProvider.getInstance(ctx)
-                    cameraProviderFuture.addListener({
-                        val provider = cameraProviderFuture.get()
-                        cameraProvider = provider
-                        val preview = Preview.Builder().build().also {
-                            it.surfaceProvider = previewView.surfaceProvider
-                        }
-                        val resolutionSelector = ResolutionSelector.Builder()
-                            .setResolutionStrategy(
-                                ResolutionStrategy(
-                                    Size(1280, 960),
-                                    ResolutionStrategy.FALLBACK_RULE_CLOSEST_LOWER_THEN_HIGHER,
-                                ),
-                            )
-                            .build()
-                        val capture = ImageCapture.Builder()
-                            .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
-                            .setResolutionSelector(resolutionSelector)
-                            .build()
-                        imageCapture = capture
+                    cameraProviderFuture.addListener(
+                        {
+                            if (previewReleased.get()) {
+                                return@addListener
+                            }
+                            val provider = try {
+                                cameraProviderFuture.get()
+                            } catch (e: Exception) {
+                                Log.e("NeetCamera", "CameraProvider get failed", e)
+                                return@addListener
+                            }
+                            if (previewReleased.get()) {
+                                runCatching { provider.unbindAll() }
+                                return@addListener
+                            }
+                            val preview = Preview.Builder().build().also {
+                                it.surfaceProvider = previewView.surfaceProvider
+                            }
+                            val resolutionSelector = ResolutionSelector.Builder()
+                                .setResolutionStrategy(
+                                    ResolutionStrategy(
+                                        Size(1280, 960),
+                                        ResolutionStrategy.FALLBACK_RULE_CLOSEST_LOWER_THEN_HIGHER,
+                                    ),
+                                )
+                                .build()
+                            val capture = ImageCapture.Builder()
+                                .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
+                                .setResolutionSelector(resolutionSelector)
+                                .build()
+                            imageCapture = capture
 
-                        val selector = CameraSelector.DEFAULT_BACK_CAMERA
-                        try {
-                            provider.unbindAll()
-                            provider.bindToLifecycle(lifecycleOwner, selector, preview, capture)
-                            cameraReady = true
-                        } catch (e: Exception) {
-                            Log.e("NeetCamera", "Camera bind failed", e)
-                        }
-                    }, ContextCompat.getMainExecutor(ctx))
+                            val selector = CameraSelector.DEFAULT_BACK_CAMERA
+                            try {
+                                provider.unbindAll()
+                                provider.bindToLifecycle(lifecycleOwner, selector, preview, capture)
+                                if (!previewReleased.get()) {
+                                    cameraReady = true
+                                }
+                            } catch (e: Exception) {
+                                Log.e("NeetCamera", "Camera bind failed", e)
+                            }
+                        },
+                        executor,
+                    )
                     previewView
                 },
                 modifier = Modifier.matchParentSize(),
+                onRelease = {
+                    previewReleased.set(true)
+                    cameraReady = false
+                    imageCapture = null
+                    runCatching {
+                        ProcessCameraProvider.getInstance(it.context).get().unbindAll()
+                    }.onFailure { e ->
+                        Log.w("NeetCamera", "Camera unbind on release", e)
+                    }
+                },
             )
 
             // Viewfinder overlay

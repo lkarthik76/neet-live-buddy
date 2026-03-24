@@ -1,6 +1,6 @@
 # KMP Mobile App (Compose Multiplatform)
 
-This is the Kotlin Multiplatform frontend for NEET Live Buddy.
+This is the Kotlin Multiplatform frontend for **Smart Study Buddy** (AI study companion).
 
 ## What is included
 
@@ -26,9 +26,11 @@ This is the Kotlin Multiplatform frontend for NEET Live Buddy.
 
 1. Open `kmp-app` in Android Studio.
 2. Let Gradle sync complete.
-3. In `NeetLiveBuddyApp`, set backend URL:
+3. In `SmartStudyBuddyApp`, set backend URL:
    - `https://<your-go-cloud-run-url>` or local LAN URL
 4. Run Android target on emulator/device.
+
+If Android Studio shows an error like `Activity class {com.neetbuddy.app/...} does not exist`, your **Run configuration** or an old install still uses the wrong package. Set launch to **Default Activity**, uninstall the app from the device, and ensure the built app id is **`com.smartstudybuddy.app`** (see `composeApp/build.gradle.kts`).
 
 ## Backend requirement
 

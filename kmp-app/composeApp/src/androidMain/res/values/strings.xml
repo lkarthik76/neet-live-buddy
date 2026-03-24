@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Short label for home screen / app drawer (~10–12 chars avoids "…" on most devices). Full name stays in-app. -->
+    <string name="app_name">Smart Study</string>
+</resources>

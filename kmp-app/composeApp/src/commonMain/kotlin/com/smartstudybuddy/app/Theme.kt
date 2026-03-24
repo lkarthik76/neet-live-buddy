@@ -76,7 +76,7 @@ val DarkColorScheme = darkColorScheme(
     outline = BorderDark,
 )
 
-val NeetTypography = Typography(
+val SmartStudyBuddyTypography = Typography(
     displayLarge = TextStyle(
         fontWeight = FontWeight.Bold,
         fontSize = 28.sp,
@@ -145,14 +145,14 @@ val NeetTypography = Typography(
 )
 
 @Composable
-fun NeetBuddyTheme(
+fun SmartStudyBuddyTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
     content: @Composable () -> Unit,
 ) {
     val colorScheme = if (darkTheme) DarkColorScheme else LightColorScheme
     MaterialTheme(
         colorScheme = colorScheme,
-        typography = NeetTypography,
+        typography = SmartStudyBuddyTypography,
         content = content,
     )
 }
