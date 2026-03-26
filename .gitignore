@@ -16,5 +16,9 @@ kmp-app/keystore.properties
 __pycache__
 *.pyc
 
+# NCERT vector index (large; deploy via GCS — see docs/ncert-rag-setup.md)
+content/index/ncert_embeddings.jsonl
+content/index/by-subject/
+
 # Docs
 # (all docs tracked in private repo)

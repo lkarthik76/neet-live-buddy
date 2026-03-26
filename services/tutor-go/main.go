@@ -149,7 +149,7 @@ func (c *GeminiClient) GenerateTutorResponse(ctx context.Context, req TutorReque
 			if err != nil {
 				log.Printf("RAG query embedding failed: %v", err)
 			} else {
-				hits := c.retriever.Search(queryEmbedding, c.ragTopK)
+				hits := c.retriever.Search(queryEmbedding, c.ragTopK, strings.TrimSpace(req.SubjectHint))
 				ragContext = formatRagContext(hits)
 			}
 		}

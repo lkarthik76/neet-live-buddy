@@ -19,11 +19,20 @@ source .venv/bin/activate
 pip install -r scripts/requirements.txt
 ```
 
-Set API key:
+Set API key (either works):
 
 ```bash
 export GOOGLE_GENAI_API_KEY="your-genai-api-key"
 ```
+
+Or copy the repo template and edit once:
+
+```bash
+cp .env.example .env.local
+# set GOOGLE_GENAI_API_KEY=... in .env.local
+```
+
+`build_ncert_index.py` loads `.env` then `.env.local` from the repo root automatically (after `pip install -r scripts/requirements.txt`).
 
 ## 2) Build a quick test index first
 
@@ -51,6 +60,14 @@ Optional tuning:
 - `--chunk-size 1200`
 - `--overlap 200`
 - `--sleep-ms 40` (rate-limit safety)
+
+Subject layout and filtering (recommended):
+
+- Put PDFs under **one folder per subject** under `--pdf-root`, e.g. `../ncert_content/biology/…`, `…/physics/…`, `…/chemistry/…`. Each JSONL line includes a lowercase `"subject"` field (first path segment under the root).
+- `--subject biology` — only embed PDFs under that top-level folder (case-insensitive).
+- `--per-subject-dir content/index/by-subject` — also write `ncert_<subject>.jsonl` per subject (in addition to `--output`). The Go service still uses a **single** combined JSONL unless you change deployment to load multiple files.
+
+At runtime, the tutor uses `subjectHint` from the client to **prefer** matching chunks; if no chunk matches (e.g. legacy index without `subject`), it searches the full index.
 
 ## 4) Enable RAG in Go service
 
